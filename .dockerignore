@@ -1,0 +1,8 @@
+node_modules
+outputs
+work
+.git
+.env
+npm-debug.log*
+backups/*.json
+recovery

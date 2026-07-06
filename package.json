@@ -1,0 +1,13 @@
+{
+  "name": "airtouch-local",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Modern local UI for a legacy Polyaire AirTouch/Zonemaster controller",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/protocol.test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

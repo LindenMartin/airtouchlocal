@@ -1,0 +1,14 @@
+services:
+  airtouch-local:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "${PORT:-4173}:4173"
+    volumes:
+      - airtouch-data:/data
+
+volumes:
+  airtouch-data:
