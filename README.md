@@ -37,7 +37,7 @@ The server listens on `127.0.0.1`, so the new UI is available only on this compu
 - Individual zone control
 - Per-group airflow opening from 10–100% in 10% steps, with controller readback verification
 - Prominent safety-spill indication, including the automatic opening percentage and an enabled zone switch
-- Automatic refresh every 30 seconds
+- Live updates across connected browsers, with configurable 5–60 second fallback refresh
 - Serialized UART requests to prevent overlapping controller commands
 - Temperature colour that moves from cold blue through comfortable tones to hot red
 - A phone-responsive settings and diagnostics dialog
@@ -66,6 +66,18 @@ them.
 The raw 353-byte status response is preserved in backups for comparison, but is
 not itself replayed as a command. Backups separately contain the verified
 13-byte name command for every reported group.
+
+## Planned smart controls
+
+The next control layer will keep automation on the server so every phone sees
+the same decisions:
+
+- Temperature rules with separate on/off thresholds, minimum run time, cooldown,
+  and configurable hysteresis to prevent rapid cycling
+- An append-only event log covering controller changes, automated decisions,
+  connection failures, and notification delivery
+- Opt-in push notifications for faults, temperature thresholds, automation
+  actions, and prolonged offline state
 
 ## Configuration and containers
 

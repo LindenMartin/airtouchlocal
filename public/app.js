@@ -14,12 +14,14 @@ const elements = {
   controllerTime: document.querySelector("#controllerTime"),
   deviceClock: document.querySelector("#deviceClock"),
   greeting: document.querySelector("#greeting"),
+  liveSyncStatus: document.querySelector("#liveSyncStatus"),
   powerButton: document.querySelector("#powerButton"),
   powerLabel: document.querySelector("#powerLabel"),
   packetHealth: document.querySelector("#packetHealth"),
   protocolMap: document.querySelector("#protocolMap"),
   rawPacket: document.querySelector("#rawPacket"),
   refreshButton: document.querySelector("#refreshButton"),
+  refreshInterval: document.querySelector("#refreshInterval"),
   settingsButton: document.querySelector("#settingsButton"),
   settingsCloseButton: document.querySelector("#settingsCloseButton"),
   settingsConnection: document.querySelector("#settingsConnection"),
@@ -40,6 +42,15 @@ let state = null;
 let requestInFlight = false;
 let updating = false;
 let toastTimeout;
+let refreshTimer;
+let pendingLiveState = null;
+const REFRESH_INTERVAL_KEY = "airtouch-refresh-seconds";
+const REFRESH_INTERVALS = [5, 10, 15, 30, 60];
+
+function storedRefreshSeconds() {
+  const stored = Number(localStorage.getItem(REFRESH_INTERVAL_KEY));
+  return REFRESH_INTERVALS.includes(stored) ? stored : 15;
+}
 
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, (character) => ({
@@ -132,7 +143,7 @@ function setText(element, value, animate) {
 }
 
 function zoneDescription(group) {
-  if (group.spill) return "All regular zones are closed · switch this zone on to exit safety spill";
+  if (group.spill) return "Spill";
   if (group.turbo) return "Turbo airflow";
   return group.on ? "Airflow on" : "Airflow off";
 }
@@ -143,7 +154,7 @@ function zoneMarkup(group) {
     <article class="zone-card${group.on ? " active" : ""}${group.spill ? " spilling" : ""}" data-zone-id="${group.id}">
       ${group.spill ? `<div class="spill-alert" role="status">
         <span class="spill-alert-dot" aria-hidden="true"></span>
-        <strong>Safety spill active</strong>
+        <strong>Spill</strong>
       </div>` : ""}
       <div class="zone-top">
         <span class="zone-icon">
@@ -231,7 +242,7 @@ function render(previous = null) {
   const controllerHour = state.controllerTime?.hour ?? new Date().getHours();
   setText(elements.greeting, `${greetingFor(controllerHour)}, ${state.owner.replace(/'s$/i, "")}`, animate);
   setText(elements.summary, spillZone
-    ? `Safety spill is protecting the system · ${spillZone.name} open ${spillZone.openPercent}%`
+    ? `Spill · ${spillZone.name} at ${spillZone.openPercent}%`
     : isOn
       ? `${activeZones} of ${state.groups.length} zones are receiving air`
       : "Your system is resting", animate);
@@ -240,7 +251,7 @@ function render(previous = null) {
   setText(elements.systemNote, state.error
     ? "Controller reported an AC fault"
     : spillZone
-      ? "All regular zones are closed; the spill vent is preventing pressure damage"
+      ? "Protective airflow is active"
       : isOn
         ? "Conditioning your active zones"
         : "Ready when you are", animate);
@@ -249,7 +260,7 @@ function render(previous = null) {
   applyTemperatureTheme(state.temperature);
   elements.powerButton.setAttribute("aria-pressed", String(isOn));
   setText(elements.powerLabel, isOn ? "Turn off" : "Turn on", animate);
-  setText(elements.zoneCount, spillZone ? `Safety spill · ${spillZone.openPercent}%` : `${activeZones} active`, animate);
+  setText(elements.zoneCount, spillZone ? `Spill · ${spillZone.openPercent}%` : `${activeZones} active`, animate);
   setText(elements.controllerTime, formatClock(state.controllerTime), animate);
   setText(elements.controllerDateLong, formatLongDate(state.controllerDate), animate);
   setText(elements.settingsControllerClock, `${formatControllerDate(state.controllerDate)} · ${formatClock(state.controllerTime)}`, animate);
@@ -298,7 +309,58 @@ async function refresh(quiet = false) {
     requestInFlight = false;
     elements.refreshButton.classList.remove("spinning");
     elements.refreshButton.removeAttribute("aria-busy");
+    applyPendingLiveState();
   }
+}
+
+function applyLiveState(nextState) {
+  if (requestInFlight || updating) {
+    pendingLiveState = nextState;
+    return;
+  }
+  const previous = state;
+  state = nextState;
+  setConnection("online", "Controller online");
+  render(previous);
+}
+
+function applyPendingLiveState() {
+  if (!pendingLiveState || requestInFlight || updating) return;
+  const nextState = pendingLiveState;
+  pendingLiveState = null;
+  applyLiveState(nextState);
+}
+
+function setRefreshInterval(seconds, announce = false) {
+  const interval = REFRESH_INTERVALS.includes(Number(seconds)) ? Number(seconds) : 15;
+  localStorage.setItem(REFRESH_INTERVAL_KEY, String(interval));
+  elements.refreshInterval.value = String(interval);
+  clearInterval(refreshTimer);
+  refreshTimer = setInterval(() => {
+    if (!document.hidden && !requestInFlight) refresh(true);
+  }, interval * 1000);
+  if (announce) showToast(`Background refresh set to ${interval === 60 ? "1 minute" : `${interval} seconds`}`);
+}
+
+function connectLiveUpdates() {
+  if (!("EventSource" in window)) {
+    elements.liveSyncStatus.textContent = "Polling only";
+    return;
+  }
+  const events = new EventSource("/api/events");
+  events.addEventListener("open", () => {
+    elements.liveSyncStatus.textContent = "Live sync on";
+  });
+  events.addEventListener("error", () => {
+    elements.liveSyncStatus.textContent = "Reconnecting…";
+  });
+  events.addEventListener("status", (event) => {
+    try {
+      applyLiveState(JSON.parse(event.data));
+    } catch {
+      // Ignore an incomplete event; EventSource will continue with the next update.
+    }
+  });
 }
 
 async function update(next) {
@@ -330,6 +392,7 @@ async function update(next) {
     requestInFlight = false;
     updating = false;
     render();
+    applyPendingLiveState();
   }
 }
 
@@ -364,6 +427,7 @@ async function updateAirflow(groupId, percent) {
     requestInFlight = false;
     updating = false;
     render();
+    applyPendingLiveState();
   }
 }
 
@@ -458,6 +522,7 @@ async function restoreSavedBackup(id, label) {
     updating = false;
     elements.backupList.classList.remove("busy");
     render();
+    applyPendingLiveState();
   }
 }
 
@@ -465,6 +530,7 @@ elements.powerButton.addEventListener("click", () => {
   if (state) update({ on: !state.on });
 });
 elements.refreshButton.addEventListener("click", () => refresh());
+elements.refreshInterval.addEventListener("change", () => setRefreshInterval(elements.refreshInterval.value, true));
 elements.backupButton.addEventListener("click", saveBackup);
 elements.settingsButton.addEventListener("click", () => {
   elements.settingsDialog.showModal();
@@ -495,9 +561,8 @@ elements.zonesGrid.addEventListener("change", (event) => {
 });
 
 refresh(true);
+setRefreshInterval(storedRefreshSeconds());
+connectLiveUpdates();
 setInterval(() => {
   elements.deviceClock.textContent = formatDeviceClock();
 }, 1000);
-setInterval(() => {
-  if (!document.hidden && !requestInFlight) refresh(true);
-}, 30_000);

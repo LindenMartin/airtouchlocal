@@ -34,6 +34,8 @@ const appAuthorization = APP_USERNAME && APP_PASSWORD
 fs.mkdirSync(BACKUPS, { recursive: true });
 
 let queue = Promise.resolve();
+const eventClients = new Set();
+let eventSequence = 0;
 
 function exclusive(task) {
   const next = queue.then(task, task);
@@ -43,6 +45,34 @@ function exclusive(task) {
 
 function delay(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function broadcastStatus(status) {
+  eventSequence += 1;
+  const message = `id: ${eventSequence}\nevent: status\ndata: ${JSON.stringify(status)}\n\n`;
+  eventClients.forEach((client) => {
+    try {
+      client.write(message);
+    } catch {
+      eventClients.delete(client);
+    }
+  });
+}
+
+function openEventStream(request, response) {
+  response.writeHead(200, {
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-cache, no-transform",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no"
+  });
+  response.write("retry: 3000\n\n");
+  eventClients.add(response);
+  const heartbeat = setInterval(() => response.write(": keep-alive\n\n"), 25_000);
+  request.on("close", () => {
+    clearInterval(heartbeat);
+    eventClients.delete(response);
+  });
 }
 
 function controllerGet(pathname) {
@@ -422,8 +452,15 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/api/events") {
+      openEventStream(request, response);
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/api/status") {
-      json(response, 200, await exclusive(readStatus));
+      const status = await exclusive(readStatus);
+      json(response, 200, status);
+      broadcastStatus(status);
       return;
     }
 
@@ -470,7 +507,9 @@ const server = http.createServer(async (request, response) => {
         return;
       }
       const backup = readBackupFile(decodeURIComponent(restoreMatch[1]));
-      json(response, 200, await exclusive(() => restoreBackup(backup)));
+      const status = await exclusive(() => restoreBackup(backup));
+      json(response, 200, status);
+      broadcastStatus(status);
       return;
     }
 
@@ -480,13 +519,17 @@ const server = http.createServer(async (request, response) => {
         json(response, 400, { error: "Expected an on boolean and optional groups object" });
         return;
       }
-      json(response, 200, await exclusive(() => updateControl(body)));
+      const status = await exclusive(() => updateControl(body));
+      json(response, 200, status);
+      broadcastStatus(status);
       return;
     }
 
     if (request.method === "POST" && url.pathname === "/api/airflow") {
       const body = await readJson(request);
-      json(response, 200, await exclusive(() => updateAirflow(Number(body.groupId), Number(body.percent))));
+      const status = await exclusive(() => updateAirflow(Number(body.groupId), Number(body.percent)));
+      json(response, 200, status);
+      broadcastStatus(status);
       return;
     }
 

@@ -110,6 +110,27 @@
 
         <section class="settings-section">
           <div class="settings-section-heading">
+            <div><p class="eyebrow">Updates</p><h3>Refresh & live sync</h3></div>
+            <span class="settings-status" id="liveSyncStatus">Connecting…</span>
+          </div>
+          <div class="refresh-setting">
+            <div>
+              <strong>Background refresh</strong>
+              <span>Fallback polling on this device</span>
+            </div>
+            <select id="refreshInterval" aria-label="Background refresh interval">
+              <option value="5">Every 5 seconds</option>
+              <option value="10">Every 10 seconds</option>
+              <option value="15">Every 15 seconds</option>
+              <option value="30">Every 30 seconds</option>
+              <option value="60">Every minute</option>
+            </select>
+          </div>
+          <p class="settings-note">Changes made by another connected browser are pushed here immediately. Refresh polling also detects changes made at the wall controller.</p>
+        </section>
+
+        <section class="settings-section">
+          <div class="settings-section-heading">
             <div><p class="eyebrow">Clock</p><h3>Date & time</h3></div>
           </div>
           <div class="clock-sync-card">
@@ -155,6 +176,6 @@
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <footer>AirTouch Local · Private by default</footer>
   </main>
-  <script src="/app.js?v=8"></script>
+  <script src="/app.js?v=9"></script>
 </body>
 </html>
