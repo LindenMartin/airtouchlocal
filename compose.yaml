@@ -6,7 +6,7 @@ services:
       - path: .env
         required: false
     ports:
-      - "${PORT:-4173}:4173"
+      - "${PORT:-4173}:${PORT:-4173}"
     volumes:
       - airtouch-data:/data
 

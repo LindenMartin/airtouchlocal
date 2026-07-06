@@ -9,7 +9,8 @@ long, unique `APP_PASSWORD`.
 docker compose up -d --build
 ```
 
-The container listens on port 4173 and stores controller snapshots in the
+The container listens on the `PORT` configured in `.env` and publishes that
+same port on the Docker host. It stores controller snapshots in the
 `airtouch-data` volume. On its first successful controller read it creates an
 immutable “Original state” snapshot for that home. It must be able to reach the
 controller IP on your LAN.
