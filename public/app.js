@@ -132,7 +132,7 @@ function setText(element, value, animate) {
 }
 
 function zoneDescription(group) {
-  if (group.spill) return "Automatic spill zone";
+  if (group.spill) return "All regular zones are closed · switch this zone on to exit safety spill";
   if (group.turbo) return "Turbo airflow";
   return group.on ? "Airflow on" : "Airflow off";
 }
@@ -140,12 +140,16 @@ function zoneDescription(group) {
 function zoneMarkup(group) {
   const airflowDisabled = updating || !state.on || !group.on || group.spill || group.turbo;
   return `
-    <article class="zone-card${group.on ? " active" : ""}" data-zone-id="${group.id}">
+    <article class="zone-card${group.on ? " active" : ""}${group.spill ? " spilling" : ""}" data-zone-id="${group.id}">
+      ${group.spill ? `<div class="spill-alert" role="status">
+        <span class="spill-alert-dot" aria-hidden="true"></span>
+        <strong>Safety spill active</strong>
+      </div>` : ""}
       <div class="zone-top">
         <span class="zone-icon">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8c4 0 4-3 8-3 2.2 0 3.7.8 5 2M4 12c5 0 5-2 9-2 2.4 0 4 .8 5.5 2M4 16c4 0 5 3 9 3 2.2 0 3.7-.8 5-2"/></svg>
         </span>
-        <button class="zone-toggle" data-zone-toggle="${group.id}" aria-label="Toggle ${escapeHtml(group.name)}" aria-pressed="${group.on}" ${updating || !state.on || group.spill ? "disabled" : ""}>
+        <button class="zone-toggle" data-zone-toggle="${group.id}" aria-label="Toggle ${escapeHtml(group.name)}" aria-pressed="${group.on}" ${updating || !state.on ? "disabled" : ""}>
           <span class="zone-toggle-label">${group.on ? "On" : "Off"}</span>
           <span class="switch" aria-hidden="true"></span>
         </button>
@@ -153,7 +157,7 @@ function zoneMarkup(group) {
       <h3>${escapeHtml(group.name)}</h3>
       <p class="zone-status">${zoneDescription(group)}</p>
       <div class="airflow-control">
-        <label for="airflow-${group.id}"><span>Opening</span><strong class="airflow-value">${group.openPercent}%</strong></label>
+        <label for="airflow-${group.id}"><span>${group.spill ? "Safety opening" : "Opening"}</span><strong class="airflow-value">${group.openPercent}%</strong></label>
         <input id="airflow-${group.id}" class="airflow-slider" data-zone-airflow="${group.id}" type="range" min="10" max="100" step="10" value="${group.openPercent}" ${airflowDisabled ? "disabled" : ""}>
         <div class="range-scale"><span>10%</span><span>100%</span></div>
       </div>
@@ -180,8 +184,14 @@ function renderZones(previous) {
     const toggle = card.querySelector("[data-zone-toggle]");
     const slider = card.querySelector("[data-zone-airflow]");
     card.classList.toggle("active", group.on);
+    const wasSpilling = card.classList.contains("spilling");
+    card.classList.toggle("spilling", group.spill);
+    if (wasSpilling !== group.spill) {
+      card.outerHTML = zoneMarkup(group);
+      return;
+    }
     toggle.setAttribute("aria-pressed", String(group.on));
-    toggle.disabled = updating || !state.on || group.spill;
+    toggle.disabled = updating || !state.on;
     setText(toggle.querySelector(".zone-toggle-label"), group.on ? "On" : "Off", false);
     slider.disabled = updating || !state.on || !group.on || group.spill || group.turbo;
     slider.value = group.openPercent;
@@ -213,24 +223,33 @@ function renderProtocol() {
 
 function render(previous = null) {
   if (!state) return;
-  const activeZones = state.groups.filter((group) => group.on).length;
+  const spillZone = state.groups.find((group) => group.spill);
+  const activeZones = state.groups.filter((group) => group.on && !group.spill).length;
   const isOn = state.on;
   const animate = Boolean(previous);
 
   const controllerHour = state.controllerTime?.hour ?? new Date().getHours();
   setText(elements.greeting, `${greetingFor(controllerHour)}, ${state.owner.replace(/'s$/i, "")}`, animate);
-  setText(elements.summary, isOn
-    ? `${activeZones} of ${state.groups.length} zones are receiving air`
-    : "Your system is resting", animate);
+  setText(elements.summary, spillZone
+    ? `Safety spill is protecting the system · ${spillZone.name} open ${spillZone.openPercent}%`
+    : isOn
+      ? `${activeZones} of ${state.groups.length} zones are receiving air`
+      : "Your system is resting", animate);
   elements.climateCard.classList.toggle("on", isOn);
   setText(elements.systemState, state.error ? "Needs attention" : isOn ? "Running" : "Standby", animate);
-  setText(elements.systemNote, state.error ? "Controller reported an AC fault" : isOn ? "Conditioning your active zones" : "Ready when you are", animate);
+  setText(elements.systemNote, state.error
+    ? "Controller reported an AC fault"
+    : spillZone
+      ? "All regular zones are closed; the spill vent is preventing pressure damage"
+      : isOn
+        ? "Conditioning your active zones"
+        : "Ready when you are", animate);
   setText(elements.temperatureValue, state.temperature ?? "—", animate);
   setText(elements.temperatureFeeling, temperatureFeeling(state.temperature), animate);
   applyTemperatureTheme(state.temperature);
   elements.powerButton.setAttribute("aria-pressed", String(isOn));
   setText(elements.powerLabel, isOn ? "Turn off" : "Turn on", animate);
-  setText(elements.zoneCount, `${activeZones} active`, animate);
+  setText(elements.zoneCount, spillZone ? `Safety spill · ${spillZone.openPercent}%` : `${activeZones} active`, animate);
   setText(elements.controllerTime, formatClock(state.controllerTime), animate);
   setText(elements.controllerDateLong, formatLongDate(state.controllerDate), animate);
   setText(elements.settingsControllerClock, `${formatControllerDate(state.controllerDate)} · ${formatClock(state.controllerTime)}`, animate);

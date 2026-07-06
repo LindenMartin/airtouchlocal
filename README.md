@@ -36,6 +36,7 @@ The server listens on `127.0.0.1`, so the new UI is available only on this compu
 - AC power control
 - Individual zone control
 - Per-group airflow opening from 10–100% in 10% steps, with controller readback verification
+- Prominent safety-spill indication, including the automatic opening percentage and an enabled zone switch
 - Automatic refresh every 30 seconds
 - Serialized UART requests to prevent overlapping controller commands
 - Temperature colour that moves from cold blue through comfortable tones to hot red
