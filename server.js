@@ -279,6 +279,16 @@ function httpsJson(url) {
   });
 }
 
+function weatherHint(pathname) {
+  if (pathname === "/api/geocode") {
+    return "Try a simpler location such as “Perth”, “Perth WA”, or use device location. Weather lookup uses Open-Meteo geocoding.";
+  }
+  if (pathname === "/api/weather") {
+    return "Check that weather is enabled, a location is saved, and this server can reach Open-Meteo.";
+  }
+  return `Check that ${AIRCON_HOST} is reachable and AIRCON_USER/AIRCON_PASSWORD are correct.`;
+}
+
 function weatherCode(code) {
   const value = Number(code);
   if ([0].includes(value)) return { icon: "☀️", label: "Clear" };
@@ -290,6 +300,25 @@ function weatherCode(code) {
   if ([71, 73, 75, 77, 85, 86].includes(value)) return { icon: "🌨️", label: "Snow" };
   if ([95, 96, 99].includes(value)) return { icon: "⛈️", label: "Storm" };
   return { icon: "🌡️", label: "Weather" };
+}
+
+function locationQueryVariants(query) {
+  const cleaned = String(query || "").trim().replace(/\s+/g, " ");
+  const variants = [];
+  const add = (value, options = {}) => {
+    const name = String(value || "").trim();
+    if (!name || variants.some((item) => item.name.toLowerCase() === name.toLowerCase() && item.countryCode === options.countryCode)) return;
+    variants.push({ name, countryCode: options.countryCode || "" });
+  };
+  add(cleaned);
+
+  const australian = /\b(australia|western australia|wa|new south wales|nsw|victoria|vic|queensland|qld|south australia|sa|tasmania|tas|northern territory|nt|act)\b/i.test(cleaned);
+  if (australian) add(cleaned.replace(/\b(western australia|new south wales|victoria|queensland|south australia|tasmania|northern territory|australia|wa|nsw|vic|qld|sa|tas|nt|act)\b/ig, "").replace(/[,\s]+$/g, "").trim(), { countryCode: "AU" });
+
+  const firstPart = cleaned.split(",")[0]?.trim();
+  if (firstPart && firstPart !== cleaned) add(firstPart, australian ? { countryCode: "AU" } : {});
+  if (/\s/.test(cleaned)) add(cleaned.split(/\s+/)[0], australian ? { countryCode: "AU" } : {});
+  return variants;
 }
 
 async function readWeather(force = false) {
@@ -341,15 +370,20 @@ async function readWeather(force = false) {
 async function geocodeLocation(name) {
   const query = String(name || "").trim();
   if (query.length < 2) throw new Error("Enter a city or suburb to search");
-  const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=5&language=en&format=json`;
-  const data = await httpsJson(url);
-  const results = (data.results || []).map((result) => ({
-    name: [result.name, result.admin1, result.country].filter(Boolean).join(", "),
-    latitude: result.latitude,
-    longitude: result.longitude,
-    timezone: result.timezone || "auto"
-  }));
-  if (!results.length) throw new Error(`No weather location matched “${query}”`);
+  let results = [];
+  for (const variant of locationQueryVariants(query)) {
+    const country = variant.countryCode ? `&countryCode=${encodeURIComponent(variant.countryCode)}` : "";
+    const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(variant.name)}&count=8&language=en&format=json${country}`;
+    const data = await httpsJson(url);
+    results = (data.results || []).map((result) => ({
+      name: [result.name, result.admin1, result.country].filter(Boolean).join(", "),
+      latitude: result.latitude,
+      longitude: result.longitude,
+      timezone: result.timezone || "auto"
+    }));
+    if (results.length) break;
+  }
+  if (!results.length) throw new Error(`No weather location matched “${query}”. Try “Perth” or “Perth WA”.`);
   return { results };
 }
 
@@ -945,9 +979,10 @@ const server = http.createServer(async (request, response) => {
     staticFile(request, response);
   } catch (error) {
     console.error(error);
+    const url = new URL(request.url, `http://${request.headers.host || "localhost"}`);
     json(response, 502, {
       error: error.message,
-      hint: `Check that ${AIRCON_HOST} is reachable and AIRCON_USER/AIRCON_PASSWORD are correct.`
+      hint: weatherHint(url.pathname)
     });
   }
 });
