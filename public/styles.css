@@ -600,6 +600,28 @@ h2 { margin-bottom: 0; letter-spacing: -.035em; font-weight: 590; }
   display: grid;
   gap: 12px;
 }
+.rule-cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.rule-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(255,255,255,.018);
+}
+.rule-card.cold-rule {
+  border-color: rgba(105,184,255,.14);
+  background: linear-gradient(145deg, rgba(105,184,255,.055), rgba(255,255,255,.014));
+}
+.rule-card.hot-rule {
+  border-color: rgba(255,133,133,.14);
+  background: linear-gradient(145deg, rgba(255,133,133,.052), rgba(255,255,255,.014));
+}
+.rule-grid { grid-template-columns: 1fr 1fr; }
 .toggle-row {
   display: flex;
   align-items: center;
@@ -619,6 +641,28 @@ h2 { margin-bottom: 0; letter-spacing: -.035em; font-weight: 590; }
   flex: 0 0 auto;
   accent-color: var(--mint-strong);
 }
+.toggle-row.compact {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.notification-options {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+.notification-options label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 12px 13px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--muted);
+  background: rgba(255,255,255,.018);
+  font-size: 12px;
+}
+.notification-options input { accent-color: var(--mint-strong); }
 .clock-sync-card { grid-template-columns: 1fr 1fr auto; align-items: stretch; }
 .clock-sync-card .secondary-button { align-self: center; }
 .settings-note { margin: 13px 0 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
@@ -813,7 +857,7 @@ footer { padding: 54px 0 0; color: #61716c; font-size: 11px; text-align: center;
   .field-hex { grid-column: 1 / -1; }
   .clock-sync-card { grid-template-columns: 1fr 1fr; }
   .clock-sync-card .secondary-button { grid-column: 1 / -1; }
-  .threshold-grid { grid-template-columns: repeat(2, 1fr); }
+  .threshold-grid, .rule-cards { grid-template-columns: repeat(2, 1fr); }
   .topbar-actions { gap: 10px; }
   .ambient-clock { min-width: 135px; }
   .ambient-icon { width: 34px; height: 34px; }
@@ -831,7 +875,7 @@ footer { padding: 54px 0 0; color: #61716c; font-size: 11px; text-align: center;
   .climate-copy { padding-right: 115px; }
   .climate-copy h2 { font-size: 24px; }
   .zones-grid, .details-section { grid-template-columns: 1fr; }
-  .weather-forecast, .smart-grid, .threshold-grid { grid-template-columns: 1fr; }
+  .weather-forecast, .smart-grid, .threshold-grid, .rule-cards, .rule-grid, .notification-options { grid-template-columns: 1fr; }
   .zone-card { min-height: 136px; }
   .protocol-details > summary { align-items: flex-start; flex-direction: column; }
   .backup-bar { align-items: stretch; flex-direction: column; }

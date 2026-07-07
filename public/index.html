@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#101b20">
   <title>AirTouch Local</title>
-  <link rel="stylesheet" href="/styles.css?v=9">
+  <link rel="stylesheet" href="/styles.css?v=10">
 </head>
 <body>
   <main class="shell">
@@ -149,7 +149,7 @@
             <span class="settings-status" id="weatherStatus">Not configured</span>
           </div>
           <div class="smart-grid">
-            <label><span>Location name</span><input id="locationName" type="text" placeholder="Home"></label>
+            <label><span>City / location</span><input id="locationName" type="text" placeholder="Perth, WA"></label>
             <label><span>Latitude</span><input id="latitude" type="number" step="0.000001" placeholder="-31.9505"></label>
             <label><span>Longitude</span><input id="longitude" type="number" step="0.000001" placeholder="115.8605"></label>
             <label><span>Forecast refresh</span>
@@ -162,10 +162,11 @@
             </label>
           </div>
           <div class="settings-actions">
+            <button class="secondary-button" id="findLocationButton">Find location</button>
             <button class="secondary-button" id="useDeviceLocationButton">Use this device location</button>
             <button class="secondary-button" id="saveWeatherButton">Save weather</button>
           </div>
-          <p class="settings-note">Forecast uses Open-Meteo from latitude/longitude. Ecowitt can be added as a richer local/indoor source once API or gateway details are configured.</p>
+          <p class="settings-note">Type a city/suburb or use device location. Forecast uses Open-Meteo; Ecowitt can be added later as a richer indoor/outdoor source.</p>
         </section>
 
         <section class="settings-section">
@@ -178,18 +179,36 @@
               <span><strong>Enable automation</strong><small>Server may turn AC power on/off after each refresh.</small></span>
               <input id="automationEnabled" type="checkbox">
             </label>
-            <label><span>Wall-panel mode assumption</span>
+            <label><span>Wall-panel assumption</span>
               <select id="modeAssumption">
-                <option value="auto-panel-24">Panel set to AUTO / stable comfort target</option>
-                <option value="cooling">Panel set to COOL</option>
-                <option value="heating">Panel set to HEAT</option>
+                <option value="auto-panel-24">Panel left at stable AUTO / comfort target</option>
+                <option value="cooling">Mostly using COOL</option>
+                <option value="heating">Mostly using HEAT</option>
               </select>
             </label>
+            <div class="rule-cards">
+              <article class="rule-card cold-rule">
+                <label class="toggle-row compact">
+                  <span><strong>Cold rule</strong><small>Example: turn on below 15°, off at 21°.</small></span>
+                  <input id="heatingRuleEnabled" type="checkbox">
+                </label>
+                <div class="threshold-grid rule-grid">
+                  <label><span>Turn on below</span><input id="turnOnBelow" type="number" min="0" max="30" step="1"></label>
+                  <label><span>Turn off at / above</span><input id="turnOffAbove" type="number" min="5" max="35" step="1"></label>
+                </div>
+              </article>
+              <article class="rule-card hot-rule">
+                <label class="toggle-row compact">
+                  <span><strong>Hot rule</strong><small>Example: turn on above 25°, off at 21°.</small></span>
+                  <input id="coolingRuleEnabled" type="checkbox">
+                </label>
+                <div class="threshold-grid rule-grid">
+                  <label><span>Turn on above</span><input id="turnOnAbove" type="number" min="12" max="45" step="1"></label>
+                  <label><span>Turn off at / below</span><input id="turnOffBelow" type="number" min="5" max="40" step="1"></label>
+                </div>
+              </article>
+            </div>
             <div class="threshold-grid">
-              <label><span>Cool: turn on above</span><input id="turnOnAbove" type="number" min="12" max="45" step="1"></label>
-              <label><span>Cool: turn off below</span><input id="turnOffBelow" type="number" min="5" max="40" step="1"></label>
-              <label><span>Heat: turn on below</span><input id="turnOnBelow" type="number" min="0" max="30" step="1"></label>
-              <label><span>Heat: turn off above</span><input id="turnOffAbove" type="number" min="5" max="35" step="1"></label>
               <label><span>Minimum run</span><input id="minimumRunMinutes" type="number" min="1" max="240" step="1"></label>
               <label><span>Minimum rest</span><input id="minimumRestMinutes" type="number" min="1" max="240" step="1"></label>
             </div>
@@ -197,9 +216,16 @@
               <span><strong>Browser notifications</strong><small>Alert this device while the app is open. Real background push comes later.</small></span>
               <input id="notificationsEnabled" type="checkbox">
             </label>
+            <div class="notification-options">
+              <label><input id="notifySpill" type="checkbox"><span>Spill warnings</span></label>
+              <label><input id="notifyTemperature" type="checkbox"><span>Indoor hot/cold thresholds</span></label>
+              <label><input id="notifyAutomation" type="checkbox"><span>Automation actions</span></label>
+              <label><input id="notifyOffline" type="checkbox"><span>Controller offline</span></label>
+            </div>
           </div>
           <div class="settings-actions">
             <button class="secondary-button" id="requestNotificationsButton">Allow notifications</button>
+            <button class="secondary-button" id="testNotificationButton">Test notification</button>
             <button class="secondary-button" id="saveAutomationButton">Save smart controls</button>
           </div>
           <p class="settings-note">AirTouch Local can control power and vents, but cannot read heat/cool/dry/auto from the AC panel yet. Set that panel deliberately before enabling automation.</p>
@@ -259,6 +285,6 @@
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <footer>AirTouch Local · Private by default</footer>
   </main>
-  <script src="/app.js?v=10"></script>
+  <script src="/app.js?v=11"></script>
 </body>
 </html>

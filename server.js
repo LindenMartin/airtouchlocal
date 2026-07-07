@@ -58,15 +58,27 @@ const defaultSmartConfig = {
   },
   notifications: {
     enabled: false,
+    temperatureThresholds: true,
     indoorHotAt: 28,
     indoorColdAt: 16,
     spill: true,
     automationActions: true,
-    controllerOffline: true
+    controllerOffline: true,
+    weatherWarnings: false
   },
   automation: {
     enabled: false,
     modeAssumption: "auto-panel-24",
+    coolingRule: {
+      enabled: true,
+      turnOnAbove: 25,
+      turnOffAtOrBelow: 21
+    },
+    heatingRule: {
+      enabled: true,
+      turnOnBelow: 15,
+      turnOffAtOrAbove: 21
+    },
     turnOnAbove: 27,
     turnOffBelow: 24,
     turnOnBelow: 17,
@@ -74,6 +86,7 @@ const defaultSmartConfig = {
     minimumRunMinutes: 20,
     minimumRestMinutes: 15,
     evaluateOnRefresh: true,
+    activeRule: null,
     lastActionAt: null,
     lastAction: "none"
   },
@@ -171,11 +184,13 @@ function normalizeSmartConfig(value) {
   config.weather.provider = "open-meteo";
   config.weather.refreshMinutes = clampInteger(config.weather.refreshMinutes, 5, 180, 20);
   config.notifications.enabled = Boolean(config.notifications.enabled);
+  config.notifications.temperatureThresholds = Boolean(config.notifications.temperatureThresholds);
   config.notifications.indoorHotAt = clampInteger(config.notifications.indoorHotAt, 10, 45, 28);
   config.notifications.indoorColdAt = clampInteger(config.notifications.indoorColdAt, 0, 30, 16);
   config.notifications.spill = Boolean(config.notifications.spill);
   config.notifications.automationActions = Boolean(config.notifications.automationActions);
   config.notifications.controllerOffline = Boolean(config.notifications.controllerOffline);
+  config.notifications.weatherWarnings = Boolean(config.notifications.weatherWarnings);
   config.automation.enabled = Boolean(config.automation.enabled);
   config.automation.modeAssumption = ["cooling", "heating", "auto-panel-24"].includes(config.automation.modeAssumption)
     ? config.automation.modeAssumption
@@ -184,9 +199,16 @@ function normalizeSmartConfig(value) {
   config.automation.turnOffBelow = clampInteger(config.automation.turnOffBelow, 5, 40, 24);
   config.automation.turnOnBelow = clampInteger(config.automation.turnOnBelow, 0, 30, 17);
   config.automation.turnOffAbove = clampInteger(config.automation.turnOffAbove, 5, 35, 20);
+  config.automation.coolingRule.enabled = Boolean(config.automation.coolingRule.enabled);
+  config.automation.coolingRule.turnOnAbove = clampInteger(config.automation.coolingRule.turnOnAbove ?? config.automation.turnOnAbove, 12, 45, 25);
+  config.automation.coolingRule.turnOffAtOrBelow = clampInteger(config.automation.coolingRule.turnOffAtOrBelow ?? config.automation.turnOffBelow, 5, 40, 21);
+  config.automation.heatingRule.enabled = Boolean(config.automation.heatingRule.enabled);
+  config.automation.heatingRule.turnOnBelow = clampInteger(config.automation.heatingRule.turnOnBelow ?? config.automation.turnOnBelow, 0, 30, 15);
+  config.automation.heatingRule.turnOffAtOrAbove = clampInteger(config.automation.heatingRule.turnOffAtOrAbove ?? config.automation.turnOffAbove, 5, 35, 21);
   config.automation.minimumRunMinutes = clampInteger(config.automation.minimumRunMinutes, 1, 240, 20);
   config.automation.minimumRestMinutes = clampInteger(config.automation.minimumRestMinutes, 1, 240, 15);
   config.automation.evaluateOnRefresh = Boolean(config.automation.evaluateOnRefresh);
+  config.automation.activeRule = ["cooling", "heating"].includes(config.automation.activeRule) ? config.automation.activeRule : null;
   config.integrations.ecowitt.enabled = Boolean(config.integrations.ecowitt.enabled);
   config.integrations.solarBattery.enabled = Boolean(config.integrations.solarBattery.enabled);
   return config;
@@ -313,6 +335,21 @@ async function readWeather(force = false) {
   return value;
 }
 
+async function geocodeLocation(name) {
+  const query = String(name || "").trim();
+  if (query.length < 2) throw new Error("Enter a city or suburb to search");
+  const url = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=5&language=en&format=json`;
+  const data = await httpsJson(url);
+  const results = (data.results || []).map((result) => ({
+    name: [result.name, result.admin1, result.country].filter(Boolean).join(", "),
+    latitude: result.latitude,
+    longitude: result.longitude,
+    timezone: result.timezone || "auto"
+  }));
+  if (!results.length) throw new Error(`No weather location matched “${query}”`);
+  return { results };
+}
+
 function controllerGet(pathname) {
   return new Promise((resolve, reject) => {
     const request = http.get({
@@ -429,37 +466,48 @@ function automationDecision(config, status) {
   if (status.temperature == null || status.error || !status.available) return null;
 
   const temperature = Number(status.temperature);
-  const mode = config.automation.modeAssumption;
   const sinceLastAction = minutesSince(config.automation.lastActionAt);
+  const cooling = config.automation.coolingRule;
+  const heating = config.automation.heatingRule;
 
   if (status.on && sinceLastAction < config.automation.minimumRunMinutes) return null;
   if (!status.on && sinceLastAction < config.automation.minimumRestMinutes) return null;
 
-  if (mode === "cooling") {
-    if (!status.on && temperature >= config.automation.turnOnAbove) {
-      return { on: true, reason: `Indoor temperature is ${temperature}°C, at or above cooling start ${config.automation.turnOnAbove}°C.` };
+  if (!status.on) {
+    if (cooling.enabled && temperature >= cooling.turnOnAbove) {
+      return {
+        on: true,
+        activeRule: "cooling",
+        action: "turn-on-cooling",
+        reason: `Indoor temperature is ${temperature}°C, at or above hot-rule start ${cooling.turnOnAbove}°C.`
+      };
     }
-    if (status.on && temperature <= config.automation.turnOffBelow) {
-      return { on: false, reason: `Indoor temperature is ${temperature}°C, at or below cooling stop ${config.automation.turnOffBelow}°C.` };
+    if (heating.enabled && temperature <= heating.turnOnBelow) {
+      return {
+        on: true,
+        activeRule: "heating",
+        action: "turn-on-heating",
+        reason: `Indoor temperature is ${temperature}°C, at or below cold-rule start ${heating.turnOnBelow}°C.`
+      };
     }
     return null;
   }
 
-  if (mode === "heating") {
-    if (!status.on && temperature <= config.automation.turnOnBelow) {
-      return { on: true, reason: `Indoor temperature is ${temperature}°C, at or below heating start ${config.automation.turnOnBelow}°C.` };
-    }
-    if (status.on && temperature >= config.automation.turnOffAbove) {
-      return { on: false, reason: `Indoor temperature is ${temperature}°C, at or above heating stop ${config.automation.turnOffAbove}°C.` };
-    }
-    return null;
+  if (config.automation.activeRule === "cooling" && cooling.enabled && temperature <= cooling.turnOffAtOrBelow) {
+    return {
+      on: false,
+      activeRule: null,
+      action: "turn-off-cooling",
+      reason: `Hot-rule cycle is satisfied at ${temperature}°C, at or below ${cooling.turnOffAtOrBelow}°C.`
+    };
   }
-
-  if (!status.on && (temperature >= config.automation.turnOnAbove || temperature <= config.automation.turnOnBelow)) {
-    return { on: true, reason: `Indoor temperature is ${temperature}°C, outside the comfort band.` };
-  }
-  if (status.on && temperature <= config.automation.turnOffBelow && temperature >= config.automation.turnOffAbove) {
-    return { on: false, reason: `Indoor temperature is ${temperature}°C, back inside the comfort band.` };
+  if (config.automation.activeRule === "heating" && heating.enabled && temperature >= heating.turnOffAtOrAbove) {
+    return {
+      on: false,
+      activeRule: null,
+      action: "turn-off-heating",
+      reason: `Cold-rule cycle is satisfied at ${temperature}°C, at or above ${heating.turnOffAtOrAbove}°C.`
+    };
   }
   return null;
 }
@@ -473,8 +521,9 @@ async function evaluateAutomation(status) {
   automationBusy = true;
   try {
     logEvent("automation-decision", {
-      action: decision.on ? "turn-on" : "turn-off",
+      action: decision.action,
       reason: decision.reason,
+      activeRule: decision.activeRule,
       modeAssumption: config.automation.modeAssumption
     });
     await uartWrite(buildControlCommand(status, { on: decision.on }));
@@ -482,12 +531,14 @@ async function evaluateAutomation(status) {
     const updated = await readStatus();
     const nextConfig = readSmartConfig();
     nextConfig.automation.lastActionAt = new Date().toISOString();
-    nextConfig.automation.lastAction = decision.on ? "turn-on" : "turn-off";
+    nextConfig.automation.lastAction = decision.action;
+    nextConfig.automation.activeRule = decision.activeRule;
     writeSmartConfig(nextConfig);
     logEvent("automation-action", {
       action: nextConfig.automation.lastAction,
       reason: decision.reason,
-      temperature: status.temperature
+      temperature: status.temperature,
+      activeRule: nextConfig.automation.activeRule
     });
     return updated;
   } finally {
@@ -814,6 +865,11 @@ const server = http.createServer(async (request, response) => {
 
     if (request.method === "GET" && url.pathname === "/api/weather") {
       json(response, 200, await readWeather(url.searchParams.get("force") === "1"));
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/geocode") {
+      json(response, 200, await geocodeLocation(url.searchParams.get("name")));
       return;
     }
 

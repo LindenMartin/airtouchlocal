@@ -40,9 +40,9 @@ The server listens on `127.0.0.1`, so the new UI is available only on this compu
 - Live updates across connected browsers, with configurable 5–60 second fallback refresh
 - Serialized UART requests to prevent overlapping controller commands
 - Temperature colour that moves from cold blue through comfortable tones to hot red
-- Outside weather card from Open-Meteo, configured by latitude/longitude
+- Outside weather card from Open-Meteo, configured by city/suburb lookup or latitude/longitude
 - Opt-in smart automation rules for AC power using indoor temperature thresholds
-- Local browser notifications while the app is open
+- Configurable local browser notifications while the app is open, including a test button
 - Append-only smart event log for settings changes and automation decisions
 - A phone-responsive settings and diagnostics dialog
 - Persistent controller snapshots with an immutable “Original state” golden backup
@@ -84,7 +84,8 @@ by default and supports:
 
 - Cooling assumption: turn on above a hot threshold, turn off below a comfortable threshold
 - Heating assumption: turn on below a cold threshold, turn off above a comfortable threshold
-- AUTO/stable-panel assumption: turn on when outside the comfort band, turn off when back inside it
+- Independent hot and cold rules, each individually enabled/disabled. The default shape is:
+  cold rule on below 15°C/off at or above 21°C, and hot rule on above 25°C/off at or below 21°C
 - Minimum run and rest times to reduce rapid cycling
 - Opt-in browser notifications for spill, temperature thresholds, and power changes while the app is open
 - Forecast-aware dashboard context from Open-Meteo

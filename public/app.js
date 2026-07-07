@@ -17,6 +17,9 @@ const elements = {
   automationEnabled: document.querySelector("#automationEnabled"),
   automationStatus: document.querySelector("#automationStatus"),
   eventList: document.querySelector("#eventList"),
+  coolingRuleEnabled: document.querySelector("#coolingRuleEnabled"),
+  findLocationButton: document.querySelector("#findLocationButton"),
+  heatingRuleEnabled: document.querySelector("#heatingRuleEnabled"),
   latitude: document.querySelector("#latitude"),
   locationName: document.querySelector("#locationName"),
   liveSyncStatus: document.querySelector("#liveSyncStatus"),
@@ -24,6 +27,10 @@ const elements = {
   minimumRestMinutes: document.querySelector("#minimumRestMinutes"),
   minimumRunMinutes: document.querySelector("#minimumRunMinutes"),
   modeAssumption: document.querySelector("#modeAssumption"),
+  notifyAutomation: document.querySelector("#notifyAutomation"),
+  notifyOffline: document.querySelector("#notifyOffline"),
+  notifySpill: document.querySelector("#notifySpill"),
+  notifyTemperature: document.querySelector("#notifyTemperature"),
   notificationsEnabled: document.querySelector("#notificationsEnabled"),
   outsideTemp: document.querySelector("#outsideTemp"),
   powerButton: document.querySelector("#powerButton"),
@@ -46,6 +53,7 @@ const elements = {
   systemState: document.querySelector("#systemState"),
   temperatureValue: document.querySelector("#temperatureValue"),
   temperatureFeeling: document.querySelector("#temperatureFeeling"),
+  testNotificationButton: document.querySelector("#testNotificationButton"),
   timerSummary: document.querySelector("#timerSummary"),
   turnOffAbove: document.querySelector("#turnOffAbove"),
   turnOffBelow: document.querySelector("#turnOffBelow"),
@@ -147,8 +155,7 @@ function notificationAllowed() {
   return smartConfig?.notifications?.enabled && "Notification" in window && Notification.permission === "granted";
 }
 
-function notify(title, body) {
-  if (!notificationAllowed()) return;
+function sendBrowserNotification(title, body) {
   try {
     new Notification(title, {
       body,
@@ -158,6 +165,11 @@ function notify(title, body) {
   } catch {
     // Some browsers expose Notification but still refuse it outside secure contexts.
   }
+}
+
+function notify(title, body) {
+  if (!notificationAllowed()) return;
+  sendBrowserNotification(title, body);
 }
 
 function maybeNotify(previous) {
@@ -170,8 +182,8 @@ function maybeNotify(previous) {
 
   const hot = state.temperature != null && state.temperature >= smartConfig.notifications.indoorHotAt;
   const cold = state.temperature != null && state.temperature <= smartConfig.notifications.indoorColdAt;
-  if (hot && !notifiedState.hot) notify("Home is getting warm", `Inside is ${state.temperature}°C.`);
-  if (cold && !notifiedState.cold) notify("Home is getting cold", `Inside is ${state.temperature}°C.`);
+  if (smartConfig.notifications.temperatureThresholds && hot && !notifiedState.hot) notify("Home is getting warm", `Inside is ${state.temperature}°C.`);
+  if (smartConfig.notifications.temperatureThresholds && cold && !notifiedState.cold) notify("Home is getting cold", `Inside is ${state.temperature}°C.`);
   notifiedState.hot = hot;
   notifiedState.cold = cold;
 
@@ -211,13 +223,19 @@ function populateSmartConfig() {
   elements.weatherStatus.textContent = smartConfig.weather.enabled ? "Forecast on" : "Not configured";
   elements.automationEnabled.checked = Boolean(smartConfig.automation.enabled);
   elements.modeAssumption.value = smartConfig.automation.modeAssumption;
-  elements.turnOnAbove.value = smartConfig.automation.turnOnAbove;
-  elements.turnOffBelow.value = smartConfig.automation.turnOffBelow;
-  elements.turnOnBelow.value = smartConfig.automation.turnOnBelow;
-  elements.turnOffAbove.value = smartConfig.automation.turnOffAbove;
+  elements.coolingRuleEnabled.checked = Boolean(smartConfig.automation.coolingRule?.enabled);
+  elements.heatingRuleEnabled.checked = Boolean(smartConfig.automation.heatingRule?.enabled);
+  elements.turnOnAbove.value = smartConfig.automation.coolingRule?.turnOnAbove ?? smartConfig.automation.turnOnAbove;
+  elements.turnOffBelow.value = smartConfig.automation.coolingRule?.turnOffAtOrBelow ?? smartConfig.automation.turnOffBelow;
+  elements.turnOnBelow.value = smartConfig.automation.heatingRule?.turnOnBelow ?? smartConfig.automation.turnOnBelow;
+  elements.turnOffAbove.value = smartConfig.automation.heatingRule?.turnOffAtOrAbove ?? smartConfig.automation.turnOffAbove;
   elements.minimumRunMinutes.value = smartConfig.automation.minimumRunMinutes;
   elements.minimumRestMinutes.value = smartConfig.automation.minimumRestMinutes;
   elements.notificationsEnabled.checked = Boolean(smartConfig.notifications.enabled);
+  elements.notifySpill.checked = Boolean(smartConfig.notifications.spill);
+  elements.notifyTemperature.checked = Boolean(smartConfig.notifications.temperatureThresholds);
+  elements.notifyAutomation.checked = Boolean(smartConfig.notifications.automationActions);
+  elements.notifyOffline.checked = Boolean(smartConfig.notifications.controllerOffline);
   elements.automationStatus.textContent = smartConfig.automation.enabled ? "Armed" : "Off";
 }
 
@@ -661,6 +679,26 @@ async function saveSmartConfig(patch, successMessage) {
   }
 }
 
+async function geocodeTypedLocation() {
+  const name = elements.locationName.value.trim();
+  if (!name) throw new Error("Enter a city/suburb or use device location");
+  const result = await api(`/api/geocode?name=${encodeURIComponent(name)}`);
+  const location = result.results?.[0];
+  if (!location) throw new Error(`No weather location matched “${name}”`);
+  elements.locationName.value = location.name;
+  elements.latitude.value = Number(location.latitude).toFixed(6);
+  elements.longitude.value = Number(location.longitude).toFixed(6);
+  showToast(`Found ${location.name}`);
+  return location;
+}
+
+async function saveWeatherFromForm() {
+  if (elements.latitude.value === "" || elements.longitude.value === "") {
+    await geocodeTypedLocation();
+  }
+  await saveSmartConfig(readWeatherForm(), "Weather settings saved");
+}
+
 function readWeatherForm() {
   return {
     location: {
@@ -680,15 +718,26 @@ function readAutomationForm() {
   return {
     notifications: {
       enabled: elements.notificationsEnabled.checked,
+      temperatureThresholds: elements.notifyTemperature.checked,
       indoorHotAt: Number(elements.turnOnAbove.value || 28),
       indoorColdAt: Number(elements.turnOnBelow.value || 16),
-      spill: true,
-      automationActions: true,
-      controllerOffline: true
+      spill: elements.notifySpill.checked,
+      automationActions: elements.notifyAutomation.checked,
+      controllerOffline: elements.notifyOffline.checked
     },
     automation: {
       enabled: elements.automationEnabled.checked,
       modeAssumption: elements.modeAssumption.value,
+      coolingRule: {
+        enabled: elements.coolingRuleEnabled.checked,
+        turnOnAbove: Number(elements.turnOnAbove.value),
+        turnOffAtOrBelow: Number(elements.turnOffBelow.value)
+      },
+      heatingRule: {
+        enabled: elements.heatingRuleEnabled.checked,
+        turnOnBelow: Number(elements.turnOnBelow.value),
+        turnOffAtOrAbove: Number(elements.turnOffAbove.value)
+      },
       turnOnAbove: Number(elements.turnOnAbove.value),
       turnOffBelow: Number(elements.turnOffBelow.value),
       turnOnBelow: Number(elements.turnOnBelow.value),
@@ -774,7 +823,30 @@ elements.powerButton.addEventListener("click", () => {
 elements.refreshButton.addEventListener("click", () => refresh());
 elements.refreshInterval.addEventListener("change", () => setRefreshInterval(elements.refreshInterval.value, true));
 elements.backupButton.addEventListener("click", saveBackup);
-elements.saveWeatherButton.addEventListener("click", () => saveSmartConfig(readWeatherForm(), "Weather settings saved"));
+elements.findLocationButton.addEventListener("click", async () => {
+  elements.findLocationButton.disabled = true;
+  elements.findLocationButton.textContent = "Finding…";
+  try {
+    await geocodeTypedLocation();
+  } catch (error) {
+    showToast(error.message, true);
+  } finally {
+    elements.findLocationButton.disabled = false;
+    elements.findLocationButton.textContent = "Find location";
+  }
+});
+elements.saveWeatherButton.addEventListener("click", async () => {
+  elements.saveWeatherButton.disabled = true;
+  elements.saveWeatherButton.textContent = "Saving…";
+  try {
+    await saveWeatherFromForm();
+  } catch (error) {
+    showToast(error.message, true);
+  } finally {
+    elements.saveWeatherButton.disabled = false;
+    elements.saveWeatherButton.textContent = "Save weather";
+  }
+});
 elements.useDeviceLocationButton.addEventListener("click", useDeviceLocation);
 elements.saveAutomationButton.addEventListener("click", () => saveSmartConfig(readAutomationForm(), "Smart controls saved"));
 elements.requestNotificationsButton.addEventListener("click", async () => {
@@ -789,6 +861,20 @@ elements.requestNotificationsButton.addEventListener("click", async () => {
   } else {
     showToast("Notifications were not allowed", true);
   }
+});
+elements.testNotificationButton.addEventListener("click", async () => {
+  if (!("Notification" in window)) {
+    showToast("This browser does not support notifications", true);
+    return;
+  }
+  let permission = Notification.permission;
+  if (permission !== "granted") permission = await Notification.requestPermission();
+  if (permission !== "granted") {
+    showToast("Notifications were not allowed", true);
+    return;
+  }
+  sendBrowserNotification("AirTouch Local test", "Notifications are working on this device.");
+  showToast("Test notification sent");
 });
 elements.settingsButton.addEventListener("click", () => {
   elements.settingsDialog.showModal();
