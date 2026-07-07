@@ -62,6 +62,7 @@ const elements = {
   useDeviceLocationButton: document.querySelector("#useDeviceLocationButton"),
   toast: document.querySelector("#toast"),
   weatherCard: document.querySelector("#weatherCard"),
+  weatherEnabled: document.querySelector("#weatherEnabled"),
   weatherForecast: document.querySelector("#weatherForecast"),
   weatherIcon: document.querySelector("#weatherIcon"),
   weatherRefresh: document.querySelector("#weatherRefresh"),
@@ -197,7 +198,7 @@ function renderWeather() {
     setText(elements.outsideTemp, "—", false);
     setText(elements.weatherIcon, "🌤️", false);
     setText(elements.weatherSummary, weather?.reason || "Add your location for forecast-aware comfort.", false);
-    elements.weatherForecast.innerHTML = '<div><strong>Weather</strong><span>Not configured</span></div>';
+    elements.weatherForecast.innerHTML = `<div><strong>Weather</strong><span>${escapeHtml(weather?.reason || "Not configured")}</span></div>`;
     elements.weatherCard.classList.remove("ready");
     return;
   }
@@ -219,8 +220,9 @@ function populateSmartConfig() {
   elements.locationName.value = smartConfig.location.name || "";
   elements.latitude.value = smartConfig.location.latitude ?? "";
   elements.longitude.value = smartConfig.location.longitude ?? "";
+  elements.weatherEnabled.checked = Boolean(smartConfig.weather.enabled);
   elements.weatherRefresh.value = String(smartConfig.weather.refreshMinutes);
-  elements.weatherStatus.textContent = smartConfig.weather.enabled ? "Forecast on" : "Not configured";
+  elements.weatherStatus.textContent = weatherStatusText(smartConfig);
   elements.automationEnabled.checked = Boolean(smartConfig.automation.enabled);
   elements.modeAssumption.value = smartConfig.automation.modeAssumption;
   elements.coolingRuleEnabled.checked = Boolean(smartConfig.automation.coolingRule?.enabled);
@@ -237,6 +239,12 @@ function populateSmartConfig() {
   elements.notifyAutomation.checked = Boolean(smartConfig.notifications.automationActions);
   elements.notifyOffline.checked = Boolean(smartConfig.notifications.controllerOffline);
   elements.automationStatus.textContent = smartConfig.automation.enabled ? "Armed" : "Off";
+}
+
+function weatherStatusText(config) {
+  if (!config?.weather?.enabled) return "Off";
+  if (config.location?.latitude == null || config.location?.longitude == null) return "Needs location";
+  return "On";
 }
 
 function formatTimer(timer) {
@@ -693,7 +701,7 @@ async function geocodeTypedLocation() {
 }
 
 async function saveWeatherFromForm() {
-  if (elements.latitude.value === "" || elements.longitude.value === "") {
+  if (elements.weatherEnabled.checked && (elements.latitude.value === "" || elements.longitude.value === "")) {
     await geocodeTypedLocation();
   }
   await saveSmartConfig(readWeatherForm(), "Weather settings saved");
@@ -708,7 +716,7 @@ function readWeatherForm() {
       timezone: "auto"
     },
     weather: {
-      enabled: elements.latitude.value !== "" && elements.longitude.value !== "",
+      enabled: elements.weatherEnabled.checked,
       refreshMinutes: Number(elements.weatherRefresh.value)
     }
   };

@@ -180,7 +180,7 @@ function normalizeSmartConfig(value) {
   config.location.latitude = finiteOrNull(config.location.latitude);
   config.location.longitude = finiteOrNull(config.location.longitude);
   config.location.timezone = String(config.location.timezone || "auto").slice(0, 60);
-  config.weather.enabled = Boolean(config.weather.enabled && config.location.latitude != null && config.location.longitude != null);
+  config.weather.enabled = Boolean(config.weather.enabled);
   config.weather.provider = "open-meteo";
   config.weather.refreshMinutes = clampInteger(config.weather.refreshMinutes, 5, 180, 20);
   config.notifications.enabled = Boolean(config.notifications.enabled);
@@ -295,7 +295,10 @@ function weatherCode(code) {
 async function readWeather(force = false) {
   const config = readSmartConfig();
   if (!config.weather.enabled) {
-    return { enabled: false, reason: "Set a location to enable outside forecast." };
+    return { enabled: false, configured: false, reason: "Weather is turned off." };
+  }
+  if (config.location.latitude == null || config.location.longitude == null) {
+    return { enabled: false, configured: false, reason: "Weather is on, but needs a city or latitude/longitude." };
   }
   const refreshMs = config.weather.refreshMinutes * 60_000;
   if (!force && weatherCache && Date.now() - weatherCache.cachedAt < refreshMs) {

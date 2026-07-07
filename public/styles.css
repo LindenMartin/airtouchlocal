@@ -646,6 +646,7 @@ h2 { margin-bottom: 0; letter-spacing: -.035em; font-weight: 590; }
   border: 0;
   background: transparent;
 }
+.feature-toggle { margin-bottom: 12px; }
 .notification-options {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
