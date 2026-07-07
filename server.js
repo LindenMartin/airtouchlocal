@@ -1,6 +1,7 @@
 "use strict";
 
 const http = require("node:http");
+const https = require("node:https");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -22,7 +23,10 @@ const AIRCON_PASSWORD = process.env.AIRCON_PASSWORD || "admin";
 const APP_USERNAME = process.env.APP_USERNAME || "";
 const APP_PASSWORD = process.env.APP_PASSWORD || "";
 const PUBLIC = path.join(__dirname, "public");
+const DATA_DIR = path.resolve(process.env.DATA_DIR || path.dirname(process.env.BACKUP_DIR || path.join(__dirname, "data", "backups")));
 const BACKUPS = path.resolve(process.env.BACKUP_DIR || path.join(__dirname, "backups"));
+const SMART_CONFIG_FILE = path.join(DATA_DIR, "smart-config.json");
+const EVENT_LOG_FILE = path.join(DATA_DIR, "events.jsonl");
 const authorization = `Basic ${Buffer.from(`${AIRCON_USER}:${AIRCON_PASSWORD}`).toString("base64")}`;
 if (Boolean(APP_USERNAME) !== Boolean(APP_PASSWORD)) {
   throw new Error("APP_USERNAME and APP_PASSWORD must either both be set or both be empty");
@@ -31,11 +35,59 @@ const appAuthorization = APP_USERNAME && APP_PASSWORD
   ? `Basic ${Buffer.from(`${APP_USERNAME}:${APP_PASSWORD}`).toString("base64")}`
   : null;
 
+fs.mkdirSync(DATA_DIR, { recursive: true });
 fs.mkdirSync(BACKUPS, { recursive: true });
 
 let queue = Promise.resolve();
 const eventClients = new Set();
 let eventSequence = 0;
+let weatherCache = null;
+let automationBusy = false;
+
+const defaultSmartConfig = {
+  location: {
+    name: process.env.WEATHER_LOCATION || "",
+    latitude: Number(process.env.WEATHER_LAT || "") || null,
+    longitude: Number(process.env.WEATHER_LON || "") || null,
+    timezone: process.env.WEATHER_TIMEZONE || "auto"
+  },
+  weather: {
+    enabled: Boolean(process.env.WEATHER_LAT && process.env.WEATHER_LON),
+    provider: "open-meteo",
+    refreshMinutes: 20
+  },
+  notifications: {
+    enabled: false,
+    indoorHotAt: 28,
+    indoorColdAt: 16,
+    spill: true,
+    automationActions: true,
+    controllerOffline: true
+  },
+  automation: {
+    enabled: false,
+    modeAssumption: "auto-panel-24",
+    turnOnAbove: 27,
+    turnOffBelow: 24,
+    turnOnBelow: 17,
+    turnOffAbove: 20,
+    minimumRunMinutes: 20,
+    minimumRestMinutes: 15,
+    evaluateOnRefresh: true,
+    lastActionAt: null,
+    lastAction: "none"
+  },
+  integrations: {
+    ecowitt: {
+      enabled: false,
+      note: "Add Ecowitt API or local gateway credentials later; keep cloud URLs and keys out of Git."
+    },
+    solarBattery: {
+      enabled: false,
+      note: "Future input for cheap/available solar energy and battery state."
+    }
+  }
+};
 
 function exclusive(task) {
   const next = queue.then(task, task);
@@ -59,6 +111,18 @@ function broadcastStatus(status) {
   });
 }
 
+function broadcastNamedEvent(name, value) {
+  eventSequence += 1;
+  const message = `id: ${eventSequence}\nevent: ${name}\ndata: ${JSON.stringify(value)}\n\n`;
+  eventClients.forEach((client) => {
+    try {
+      client.write(message);
+    } catch {
+      eventClients.delete(client);
+    }
+  });
+}
+
 function openEventStream(request, response) {
   response.writeHead(200, {
     "Content-Type": "text/event-stream; charset=utf-8",
@@ -73,6 +137,180 @@ function openEventStream(request, response) {
     clearInterval(heartbeat);
     eventClients.delete(response);
   });
+}
+
+function mergeConfig(base, patch) {
+  if (!patch || typeof patch !== "object" || Array.isArray(patch)) return structuredClone(base);
+  const output = structuredClone(base);
+  Object.entries(patch).forEach(([key, value]) => {
+    if (value && typeof value === "object" && !Array.isArray(value) && output[key] && typeof output[key] === "object") {
+      output[key] = mergeConfig(output[key], value);
+    } else {
+      output[key] = value;
+    }
+  });
+  return output;
+}
+
+function readSmartConfig() {
+  try {
+    const saved = JSON.parse(fs.readFileSync(SMART_CONFIG_FILE, "utf8"));
+    return normalizeSmartConfig(mergeConfig(defaultSmartConfig, saved));
+  } catch {
+    return normalizeSmartConfig(defaultSmartConfig);
+  }
+}
+
+function normalizeSmartConfig(value) {
+  const config = mergeConfig(defaultSmartConfig, value);
+  config.location.name = String(config.location.name || "").slice(0, 80);
+  config.location.latitude = finiteOrNull(config.location.latitude);
+  config.location.longitude = finiteOrNull(config.location.longitude);
+  config.location.timezone = String(config.location.timezone || "auto").slice(0, 60);
+  config.weather.enabled = Boolean(config.weather.enabled && config.location.latitude != null && config.location.longitude != null);
+  config.weather.provider = "open-meteo";
+  config.weather.refreshMinutes = clampInteger(config.weather.refreshMinutes, 5, 180, 20);
+  config.notifications.enabled = Boolean(config.notifications.enabled);
+  config.notifications.indoorHotAt = clampInteger(config.notifications.indoorHotAt, 10, 45, 28);
+  config.notifications.indoorColdAt = clampInteger(config.notifications.indoorColdAt, 0, 30, 16);
+  config.notifications.spill = Boolean(config.notifications.spill);
+  config.notifications.automationActions = Boolean(config.notifications.automationActions);
+  config.notifications.controllerOffline = Boolean(config.notifications.controllerOffline);
+  config.automation.enabled = Boolean(config.automation.enabled);
+  config.automation.modeAssumption = ["cooling", "heating", "auto-panel-24"].includes(config.automation.modeAssumption)
+    ? config.automation.modeAssumption
+    : "auto-panel-24";
+  config.automation.turnOnAbove = clampInteger(config.automation.turnOnAbove, 12, 45, 27);
+  config.automation.turnOffBelow = clampInteger(config.automation.turnOffBelow, 5, 40, 24);
+  config.automation.turnOnBelow = clampInteger(config.automation.turnOnBelow, 0, 30, 17);
+  config.automation.turnOffAbove = clampInteger(config.automation.turnOffAbove, 5, 35, 20);
+  config.automation.minimumRunMinutes = clampInteger(config.automation.minimumRunMinutes, 1, 240, 20);
+  config.automation.minimumRestMinutes = clampInteger(config.automation.minimumRestMinutes, 1, 240, 15);
+  config.automation.evaluateOnRefresh = Boolean(config.automation.evaluateOnRefresh);
+  config.integrations.ecowitt.enabled = Boolean(config.integrations.ecowitt.enabled);
+  config.integrations.solarBattery.enabled = Boolean(config.integrations.solarBattery.enabled);
+  return config;
+}
+
+function finiteOrNull(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function clampInteger(value, min, max, fallback) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.max(min, Math.min(max, Math.round(number)));
+}
+
+function writeSmartConfig(value) {
+  const config = normalizeSmartConfig(value);
+  fs.writeFileSync(SMART_CONFIG_FILE, JSON.stringify(config, null, 2));
+  broadcastNamedEvent("smart-config", config);
+  return config;
+}
+
+function logEvent(type, details = {}) {
+  const event = {
+    at: new Date().toISOString(),
+    type,
+    details
+  };
+  fs.appendFileSync(EVENT_LOG_FILE, `${JSON.stringify(event)}\n`);
+  broadcastNamedEvent("smart-event", event);
+  return event;
+}
+
+function readEvents(limit = 60) {
+  if (!fs.existsSync(EVENT_LOG_FILE)) return [];
+  const lines = fs.readFileSync(EVENT_LOG_FILE, "utf8").trim().split(/\r?\n/).filter(Boolean);
+  return lines.slice(-Math.max(1, Math.min(200, Number(limit) || 60))).map((line) => {
+    try {
+      return JSON.parse(line);
+    } catch {
+      return { at: null, type: "invalid-log-entry", details: { line } };
+    }
+  }).reverse();
+}
+
+function httpsJson(url) {
+  return new Promise((resolve, reject) => {
+    const request = https.get(url, { timeout: 7000, headers: { "User-Agent": "AirTouchLocal/1.0" } }, (response) => {
+      let body = "";
+      response.setEncoding("utf8");
+      response.on("data", (chunk) => { body += chunk; });
+      response.on("end", () => {
+        if (response.statusCode !== 200) {
+          reject(new Error(`Weather provider returned HTTP ${response.statusCode}`));
+          return;
+        }
+        try {
+          resolve(JSON.parse(body));
+        } catch {
+          reject(new Error("Weather provider returned invalid JSON"));
+        }
+      });
+    });
+    request.on("timeout", () => request.destroy(new Error("Weather provider timed out")));
+    request.on("error", reject);
+  });
+}
+
+function weatherCode(code) {
+  const value = Number(code);
+  if ([0].includes(value)) return { icon: "☀️", label: "Clear" };
+  if ([1, 2].includes(value)) return { icon: "🌤️", label: "Partly cloudy" };
+  if ([3].includes(value)) return { icon: "☁️", label: "Cloudy" };
+  if ([45, 48].includes(value)) return { icon: "🌫️", label: "Fog" };
+  if ([51, 53, 55, 56, 57].includes(value)) return { icon: "🌦️", label: "Drizzle" };
+  if ([61, 63, 65, 66, 67, 80, 81, 82].includes(value)) return { icon: "🌧️", label: "Rain" };
+  if ([71, 73, 75, 77, 85, 86].includes(value)) return { icon: "🌨️", label: "Snow" };
+  if ([95, 96, 99].includes(value)) return { icon: "⛈️", label: "Storm" };
+  return { icon: "🌡️", label: "Weather" };
+}
+
+async function readWeather(force = false) {
+  const config = readSmartConfig();
+  if (!config.weather.enabled) {
+    return { enabled: false, reason: "Set a location to enable outside forecast." };
+  }
+  const refreshMs = config.weather.refreshMinutes * 60_000;
+  if (!force && weatherCache && Date.now() - weatherCache.cachedAt < refreshMs) {
+    return weatherCache.value;
+  }
+  const latitude = encodeURIComponent(config.location.latitude);
+  const longitude = encodeURIComponent(config.location.longitude);
+  const timezone = encodeURIComponent(config.location.timezone || "auto");
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,rain,weather_code,wind_speed_10m&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&forecast_days=3&timezone=${timezone}`;
+  const data = await httpsJson(url);
+  const currentCode = weatherCode(data.current?.weather_code);
+  const forecast = (data.daily?.time || []).map((date, index) => ({
+    date,
+    max: data.daily.temperature_2m_max?.[index] ?? null,
+    min: data.daily.temperature_2m_min?.[index] ?? null,
+    rainChance: data.daily.precipitation_probability_max?.[index] ?? null,
+    ...weatherCode(data.daily.weather_code?.[index])
+  }));
+  const value = {
+    enabled: true,
+    provider: "open-meteo",
+    location: config.location,
+    current: {
+      temperature: data.current?.temperature_2m ?? null,
+      apparentTemperature: data.current?.apparent_temperature ?? null,
+      humidity: data.current?.relative_humidity_2m ?? null,
+      precipitation: data.current?.precipitation ?? null,
+      rain: data.current?.rain ?? null,
+      windSpeed: data.current?.wind_speed_10m ?? null,
+      isDay: Boolean(data.current?.is_day),
+      ...currentCode
+    },
+    forecast,
+    fetchedAt: new Date().toISOString()
+  };
+  weatherCache = { cachedAt: Date.now(), value };
+  return value;
 }
 
 function controllerGet(pathname) {
@@ -177,6 +415,84 @@ async function updateAirflow(groupId, percent) {
     throw new Error(`Controller reported ${updated?.openPercent ?? "unknown"}% instead of ${percent}%`);
   }
   return current;
+}
+
+function minutesSince(iso) {
+  if (!iso) return Infinity;
+  const then = Date.parse(iso);
+  if (!Number.isFinite(then)) return Infinity;
+  return (Date.now() - then) / 60_000;
+}
+
+function automationDecision(config, status) {
+  if (!config.automation.enabled || !config.automation.evaluateOnRefresh) return null;
+  if (status.temperature == null || status.error || !status.available) return null;
+
+  const temperature = Number(status.temperature);
+  const mode = config.automation.modeAssumption;
+  const sinceLastAction = minutesSince(config.automation.lastActionAt);
+
+  if (status.on && sinceLastAction < config.automation.minimumRunMinutes) return null;
+  if (!status.on && sinceLastAction < config.automation.minimumRestMinutes) return null;
+
+  if (mode === "cooling") {
+    if (!status.on && temperature >= config.automation.turnOnAbove) {
+      return { on: true, reason: `Indoor temperature is ${temperature}°C, at or above cooling start ${config.automation.turnOnAbove}°C.` };
+    }
+    if (status.on && temperature <= config.automation.turnOffBelow) {
+      return { on: false, reason: `Indoor temperature is ${temperature}°C, at or below cooling stop ${config.automation.turnOffBelow}°C.` };
+    }
+    return null;
+  }
+
+  if (mode === "heating") {
+    if (!status.on && temperature <= config.automation.turnOnBelow) {
+      return { on: true, reason: `Indoor temperature is ${temperature}°C, at or below heating start ${config.automation.turnOnBelow}°C.` };
+    }
+    if (status.on && temperature >= config.automation.turnOffAbove) {
+      return { on: false, reason: `Indoor temperature is ${temperature}°C, at or above heating stop ${config.automation.turnOffAbove}°C.` };
+    }
+    return null;
+  }
+
+  if (!status.on && (temperature >= config.automation.turnOnAbove || temperature <= config.automation.turnOnBelow)) {
+    return { on: true, reason: `Indoor temperature is ${temperature}°C, outside the comfort band.` };
+  }
+  if (status.on && temperature <= config.automation.turnOffBelow && temperature >= config.automation.turnOffAbove) {
+    return { on: false, reason: `Indoor temperature is ${temperature}°C, back inside the comfort band.` };
+  }
+  return null;
+}
+
+async function evaluateAutomation(status) {
+  if (automationBusy) return status;
+  const config = readSmartConfig();
+  const decision = automationDecision(config, status);
+  if (!decision) return status;
+
+  automationBusy = true;
+  try {
+    logEvent("automation-decision", {
+      action: decision.on ? "turn-on" : "turn-off",
+      reason: decision.reason,
+      modeAssumption: config.automation.modeAssumption
+    });
+    await uartWrite(buildControlCommand(status, { on: decision.on }));
+    await delay(350);
+    const updated = await readStatus();
+    const nextConfig = readSmartConfig();
+    nextConfig.automation.lastActionAt = new Date().toISOString();
+    nextConfig.automation.lastAction = decision.on ? "turn-on" : "turn-off";
+    writeSmartConfig(nextConfig);
+    logEvent("automation-action", {
+      action: nextConfig.automation.lastAction,
+      reason: decision.reason,
+      temperature: status.temperature
+    });
+    return updated;
+  } finally {
+    automationBusy = false;
+  }
 }
 
 function safeEqual(left, right) {
@@ -458,7 +774,7 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (request.method === "GET" && url.pathname === "/api/status") {
-      const status = await exclusive(readStatus);
+      const status = await exclusive(async () => evaluateAutomation(await readStatus()));
       json(response, 200, status);
       broadcastStatus(status);
       return;
@@ -468,11 +784,41 @@ const server = http.createServer(async (request, response) => {
       json(response, 200, {
         controllerHost: AIRCON_HOST,
         appAuthentication: appAuthorization ? "password" : "local-only",
+        smartConfigStored: fs.existsSync(SMART_CONFIG_FILE),
+        dataDir: DATA_DIR,
         clockSync: {
           supported: false,
           reason: "No independently verified clock-write command has been identified."
         }
       });
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/smart-config") {
+      json(response, 200, readSmartConfig());
+      return;
+    }
+
+    if (request.method === "POST" && url.pathname === "/api/smart-config") {
+      const body = await readJson(request);
+      const config = writeSmartConfig(mergeConfig(readSmartConfig(), body));
+      weatherCache = null;
+      logEvent("smart-config-updated", {
+        weather: config.weather.enabled,
+        automation: config.automation.enabled,
+        notifications: config.notifications.enabled
+      });
+      json(response, 200, config);
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/weather") {
+      json(response, 200, await readWeather(url.searchParams.get("force") === "1"));
+      return;
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/events-log") {
+      json(response, 200, { events: readEvents(url.searchParams.get("limit")) });
       return;
     }
 

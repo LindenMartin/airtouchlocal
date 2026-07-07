@@ -40,6 +40,10 @@ The server listens on `127.0.0.1`, so the new UI is available only on this compu
 - Live updates across connected browsers, with configurable 5–60 second fallback refresh
 - Serialized UART requests to prevent overlapping controller commands
 - Temperature colour that moves from cold blue through comfortable tones to hot red
+- Outside weather card from Open-Meteo, configured by latitude/longitude
+- Opt-in smart automation rules for AC power using indoor temperature thresholds
+- Local browser notifications while the app is open
+- Append-only smart event log for settings changes and automation decisions
 - A phone-responsive settings and diagnostics dialog
 - Persistent controller snapshots with an immutable “Original state” golden backup
 - Verified-field restore with an automatic pre-restore snapshot and readback verification
@@ -47,6 +51,12 @@ The server listens on `127.0.0.1`, so the new UI is available only on this compu
 - Optional built-in web password protection
 
 The implementation speaks directly to the controller's `httpapi.json` UART bridge. It does not depend on the deprecated page.
+
+AirTouch Local can currently read indoor temperature, AC power state, zone state,
+spill state, and airflow openings. It cannot yet read the wall-panel AC mode
+(`heat`, `cool`, `dry`, or `auto`), so automation is deliberately framed as a
+wall-panel mode assumption. Set the physical AC panel intentionally before
+enabling automated power control.
 
 ## Confirmed airflow protocol
 
@@ -67,25 +77,32 @@ The raw 353-byte status response is preserved in backups for comparison, but is
 not itself replayed as a command. Backups separately contain the verified
 13-byte name command for every reported group.
 
-## Planned smart controls
+## Smart controls
 
-The next control layer will keep automation on the server so every phone sees
-the same decisions:
+Automation runs on the server so every phone sees the same decisions. It is off
+by default and supports:
 
-- Temperature rules with separate on/off thresholds, minimum run time, cooldown,
-  and configurable hysteresis to prevent rapid cycling
-- An append-only event log covering controller changes, automated decisions,
-  connection failures, and notification delivery
-- Opt-in push notifications for faults, temperature thresholds, automation
-  actions, and prolonged offline state
+- Cooling assumption: turn on above a hot threshold, turn off below a comfortable threshold
+- Heating assumption: turn on below a cold threshold, turn off above a comfortable threshold
+- AUTO/stable-panel assumption: turn on when outside the comfort band, turn off when back inside it
+- Minimum run and rest times to reduce rapid cycling
+- Opt-in browser notifications for spill, temperature thresholds, and power changes while the app is open
+- Forecast-aware dashboard context from Open-Meteo
+
+Future integrations are intentionally modelled but not yet active:
+
+- Ecowitt weather station readings for richer indoor/outdoor measured data
+- Solar/battery awareness so comfort rules can prefer cheap or available energy
+- True background Web Push notifications through HTTPS, service workers, and VAPID keys
 
 ## Configuration and containers
 
 Controller and web settings are environment variables:
 
 - `AIRCON_HOST`, `AIRCON_USER`, `AIRCON_PASSWORD`
-- `HOST`, `PORT`, `BACKUP_DIR`
+- `HOST`, `PORT`, `DATA_DIR`, `BACKUP_DIR`
 - `APP_USERNAME`, `APP_PASSWORD` for optional built-in web authentication
+- `WEATHER_LOCATION`, `WEATHER_LAT`, `WEATHER_LON`, `WEATHER_TIMEZONE` for optional forecast defaults
 
 See [DEPLOYMENT.md](DEPLOYMENT.md) for Docker Compose, phone access, and a
 Cloudflare Tunnel protected by Google sign-in through Cloudflare Access.
@@ -93,7 +110,8 @@ Cloudflare Tunnel protected by Google sign-in through Cloudflare Access.
 No household backup data is committed to the repository. On the first
 successful controller read, AirTouch Local captures that installation's
 immutable “Original state” backup inside `BACKUP_DIR`. Docker keeps it in the
-persistent `/data` volume.
+persistent `/data` volume. Smart settings and the event log are stored in
+`DATA_DIR`, which is also ignored by Git.
 
 ## Confirmed clock fields
 

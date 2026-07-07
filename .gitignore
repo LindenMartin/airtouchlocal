@@ -3,6 +3,7 @@ node_modules/
 npm-debug.log*
 backups/*.json
 !backups/.gitkeep
+data/
 recovery/
 outputs/
 work/
