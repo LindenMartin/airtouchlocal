@@ -146,11 +146,14 @@ function applyTemperatureTheme(value) {
     elements.climateCard.style.removeProperty("--temp-hue");
     return;
   }
+  elements.climateCard.style.setProperty("--temp-hue", String(temperatureHue(value)));
+}
+
+function temperatureHue(value) {
   const clamped = Math.max(10, Math.min(35, value));
-  const hue = clamped <= 20
+  return clamped <= 20
     ? Math.round(210 - ((clamped - 10) / 10) * 20)
     : Math.round(190 - ((clamped - 20) / 15) * 184);
-  elements.climateCard.style.setProperty("--temp-hue", String(hue));
 }
 
 function formatTemperature(value) {
@@ -158,7 +161,11 @@ function formatTemperature(value) {
 }
 
 function formatHour(value) {
-  return new Date(value).toLocaleTimeString(undefined, { hour: "numeric" });
+  return new Date(value).toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23"
+  });
 }
 
 function notificationAllowed() {
@@ -233,10 +240,10 @@ function renderWeather() {
   }).join("");
   const hours = weather.hourly || [];
   elements.hourlyForecast.innerHTML = hours.length ? hours.slice(0, 12).map((hour) => `
-    <article class="hour-card${hour.isDay ? " day" : " night"}">
+    <article class="hour-card${hour.isDay ? " day" : " night"}" style="--temp-hue: ${temperatureHue(hour.temperature ?? 20)}">
       <strong>${escapeHtml(formatHour(hour.time))}</strong>
       <span class="hour-icon">${escapeHtml(hour.icon)}</span>
-      <span>${formatTemperature(hour.temperature)}°C</span>
+      <span class="hour-temp">${formatTemperature(hour.temperature)}°C</span>
       <small>${hour.cloudCover ?? "—"}% cloud</small>
       <small>${hour.shortwaveRadiation == null ? "—" : Math.round(hour.shortwaveRadiation)} W/m²</small>
     </article>

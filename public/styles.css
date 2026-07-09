@@ -381,7 +381,12 @@ h2 { margin-bottom: 0; letter-spacing: -.035em; font-weight: 590; }
 .hour-card strong, .hour-card span, .hour-card small { display: block; }
 .hour-card strong { font-size: 12px; font-weight: 650; }
 .hour-icon { margin: 8px 0 6px; font-size: 20px; }
-.hour-card span:not(.hour-icon) { color: var(--ink); font-size: 14px; }
+.hour-temp {
+  color: hsl(var(--temp-hue) 82% 70%);
+  font-size: 14px;
+  font-weight: 650;
+  text-shadow: 0 0 18px hsl(var(--temp-hue) 90% 62% / .16);
+}
 .hour-card small { margin-top: 4px; color: var(--muted); font-size: 10px; }
 .hourly-empty {
   grid-column: 1 / -1;
