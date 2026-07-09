@@ -300,8 +300,10 @@ h2 { margin-bottom: 0; letter-spacing: -.035em; font-weight: 590; }
 }
 .weather-now h2 {
   margin: 0;
+  color: hsl(var(--temp-hue) 82% 70%);
   font-size: 31px;
   line-height: .95;
+  text-shadow: 0 0 22px hsl(var(--temp-hue) 90% 62% / .16);
 }
 .weather-now h2 sup { margin-left: 2px; color: var(--muted); font-size: 13px; }
 .weather-now p:last-child {
@@ -345,6 +347,11 @@ h2 { margin-bottom: 0; letter-spacing: -.035em; font-weight: 590; }
 .weather-forecast strong, .weather-forecast span { display: block; }
 .weather-forecast strong { font-size: 13px; font-weight: 600; }
 .weather-forecast span { margin-top: 5px; color: var(--muted); font-size: 11px; }
+.temp-inline {
+  color: hsl(var(--temp-hue) 82% 70%);
+  font-weight: 750;
+  text-shadow: 0 0 14px hsl(var(--temp-hue) 90% 62% / .14);
+}
 
 .hourly-weather-card {
   margin-top: 16px;

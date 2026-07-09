@@ -160,6 +160,10 @@ function formatTemperature(value) {
   return value == null ? "—" : Math.round(Number(value));
 }
 
+function temperatureStyle(value) {
+  return `--temp-hue: ${temperatureHue(value ?? 20)}`;
+}
+
 function formatHour(value) {
   return new Date(value).toLocaleTimeString(undefined, {
     hour: "2-digit",
@@ -213,7 +217,7 @@ function renderWeather() {
   if (!weather?.enabled) {
     setText(elements.outsideTemp, "—", false);
     setText(elements.weatherIcon, "🌤️", false);
-    setText(elements.weatherSummary, weather?.reason || "Add your location for forecast-aware comfort.", false);
+    elements.weatherSummary.textContent = weather?.reason || "Add your location for forecast-aware comfort.";
     elements.weatherForecast.innerHTML = `<div><strong>Weather</strong><span>${escapeHtml(weather?.reason || "Not configured")}</span></div>`;
     elements.solarOutlook.innerHTML = "<strong>Solar outlook</strong><span>Waiting for cloud forecast</span>";
     elements.hourlyForecast.innerHTML = '<div class="hourly-empty">Enable weather to see cloud cover and solar radiation.</div>';
@@ -225,9 +229,10 @@ function renderWeather() {
   }
   elements.weatherCard.classList.add("ready");
   elements.hourlyWeatherCard.classList.add("ready");
+  elements.weatherCard.style.setProperty("--temp-hue", String(temperatureHue(weather.current.temperature ?? 20)));
   setText(elements.outsideTemp, formatTemperature(weather.current.temperature), true);
   setText(elements.weatherIcon, weather.current.icon || "🌡️", true);
-  setText(elements.weatherSummary, `${weather.current.label} · ${weather.current.cloudCover ?? "—"}% cloud · feels ${formatTemperature(weather.current.apparentTemperature)}°C`, true);
+  elements.weatherSummary.innerHTML = `${escapeHtml(weather.current.label)} · ${weather.current.cloudCover ?? "—"}% cloud · feels <span class="temp-inline" style="${temperatureStyle(weather.current.apparentTemperature)}">${formatTemperature(weather.current.apparentTemperature)}°C</span>`;
   elements.googleWeatherLink.href = weather.googleWeatherUrl || "https://www.google.com/search?q=weather";
   elements.solarOutlook.innerHTML = `<strong>${escapeHtml(weather.solar?.label || "Solar outlook")}</strong><span>${escapeHtml(weather.solar?.detail || "Waiting for cloud forecast")}</span>`;
   setText(elements.hourlyWeatherSummary, weather.solar?.detail || "Cloud cover drives solar generation.", true);
@@ -235,12 +240,12 @@ function renderWeather() {
     const label = new Date(`${day.date}T12:00:00`).toLocaleDateString(undefined, { weekday: "short" });
     return `<div>
       <strong>${escapeHtml(label)} ${escapeHtml(day.icon)}</strong>
-      <span>${formatTemperature(day.min)}–${formatTemperature(day.max)}°C · ${day.rainChance ?? "—"}% rain</span>
+      <span><span class="temp-inline" style="${temperatureStyle(day.min)}">${formatTemperature(day.min)}°</span>–<span class="temp-inline" style="${temperatureStyle(day.max)}">${formatTemperature(day.max)}°C</span> · ${day.rainChance ?? "—"}% rain</span>
     </div>`;
   }).join("");
   const hours = weather.hourly || [];
   elements.hourlyForecast.innerHTML = hours.length ? hours.slice(0, 12).map((hour) => `
-    <article class="hour-card${hour.isDay ? " day" : " night"}" style="--temp-hue: ${temperatureHue(hour.temperature ?? 20)}">
+    <article class="hour-card${hour.isDay ? " day" : " night"}" style="${temperatureStyle(hour.temperature)}">
       <strong>${escapeHtml(formatHour(hour.time))}</strong>
       <span class="hour-icon">${escapeHtml(hour.icon)}</span>
       <span class="hour-temp">${formatTemperature(hour.temperature)}°C</span>
