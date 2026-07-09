@@ -14,6 +14,10 @@ const elements = {
   controllerTime: document.querySelector("#controllerTime"),
   deviceClock: document.querySelector("#deviceClock"),
   greeting: document.querySelector("#greeting"),
+  googleWeatherLink: document.querySelector("#googleWeatherLink"),
+  hourlyForecast: document.querySelector("#hourlyForecast"),
+  hourlyWeatherCard: document.querySelector("#hourlyWeatherCard"),
+  hourlyWeatherSummary: document.querySelector("#hourlyWeatherSummary"),
   automationEnabled: document.querySelector("#automationEnabled"),
   automationStatus: document.querySelector("#automationStatus"),
   eventList: document.querySelector("#eventList"),
@@ -68,6 +72,7 @@ const elements = {
   weatherRefresh: document.querySelector("#weatherRefresh"),
   weatherStatus: document.querySelector("#weatherStatus"),
   weatherSummary: document.querySelector("#weatherSummary"),
+  solarOutlook: document.querySelector("#solarOutlook"),
   zoneCount: document.querySelector("#zoneCount"),
   zonesGrid: document.querySelector("#zonesGrid")
 };
@@ -152,6 +157,10 @@ function formatTemperature(value) {
   return value == null ? "—" : Math.round(Number(value));
 }
 
+function formatHour(value) {
+  return new Date(value).toLocaleTimeString(undefined, { hour: "numeric" });
+}
+
 function notificationAllowed() {
   return smartConfig?.notifications?.enabled && "Notification" in window && Notification.permission === "granted";
 }
@@ -199,13 +208,22 @@ function renderWeather() {
     setText(elements.weatherIcon, "🌤️", false);
     setText(elements.weatherSummary, weather?.reason || "Add your location for forecast-aware comfort.", false);
     elements.weatherForecast.innerHTML = `<div><strong>Weather</strong><span>${escapeHtml(weather?.reason || "Not configured")}</span></div>`;
+    elements.solarOutlook.innerHTML = "<strong>Solar outlook</strong><span>Waiting for cloud forecast</span>";
+    elements.hourlyForecast.innerHTML = '<div class="hourly-empty">Enable weather to see cloud cover and solar radiation.</div>';
+    setText(elements.hourlyWeatherSummary, "Cloud cover drives solar generation.", false);
+    elements.googleWeatherLink.href = "https://www.google.com/search?q=weather";
     elements.weatherCard.classList.remove("ready");
+    elements.hourlyWeatherCard.classList.remove("ready");
     return;
   }
   elements.weatherCard.classList.add("ready");
+  elements.hourlyWeatherCard.classList.add("ready");
   setText(elements.outsideTemp, formatTemperature(weather.current.temperature), true);
   setText(elements.weatherIcon, weather.current.icon || "🌡️", true);
-  setText(elements.weatherSummary, `${weather.current.label} · feels like ${formatTemperature(weather.current.apparentTemperature)}°C · ${weather.current.humidity ?? "—"}% humidity`, true);
+  setText(elements.weatherSummary, `${weather.current.label} · ${weather.current.cloudCover ?? "—"}% cloud · feels ${formatTemperature(weather.current.apparentTemperature)}°C`, true);
+  elements.googleWeatherLink.href = weather.googleWeatherUrl || "https://www.google.com/search?q=weather";
+  elements.solarOutlook.innerHTML = `<strong>${escapeHtml(weather.solar?.label || "Solar outlook")}</strong><span>${escapeHtml(weather.solar?.detail || "Waiting for cloud forecast")}</span>`;
+  setText(elements.hourlyWeatherSummary, weather.solar?.detail || "Cloud cover drives solar generation.", true);
   elements.weatherForecast.innerHTML = weather.forecast.slice(0, 3).map((day) => {
     const label = new Date(`${day.date}T12:00:00`).toLocaleDateString(undefined, { weekday: "short" });
     return `<div>
@@ -213,6 +231,16 @@ function renderWeather() {
       <span>${formatTemperature(day.min)}–${formatTemperature(day.max)}°C · ${day.rainChance ?? "—"}% rain</span>
     </div>`;
   }).join("");
+  const hours = weather.hourly || [];
+  elements.hourlyForecast.innerHTML = hours.length ? hours.slice(0, 12).map((hour) => `
+    <article class="hour-card${hour.isDay ? " day" : " night"}">
+      <strong>${escapeHtml(formatHour(hour.time))}</strong>
+      <span class="hour-icon">${escapeHtml(hour.icon)}</span>
+      <span>${formatTemperature(hour.temperature)}°C</span>
+      <small>${hour.cloudCover ?? "—"}% cloud</small>
+      <small>${hour.shortwaveRadiation == null ? "—" : Math.round(hour.shortwaveRadiation)} W/m²</small>
+    </article>
+  `).join("") : '<div class="hourly-empty">No hourly forecast returned yet.</div>';
 }
 
 function populateSmartConfig() {

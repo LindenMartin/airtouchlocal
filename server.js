@@ -302,6 +302,22 @@ function weatherCode(code) {
   return { icon: "🌡️", label: "Weather" };
 }
 
+function googleWeatherUrl(location) {
+  const label = location?.name || [location?.latitude, location?.longitude].filter((value) => value != null).join(",");
+  return `https://www.google.com/search?q=${encodeURIComponent(`weather ${label || "near me"}`)}`;
+}
+
+function solarOutlook(hours) {
+  const daylight = hours.filter((hour) => hour.isDay);
+  if (!daylight.length) return { label: "Night", detail: "No solar generation expected in this window." };
+  const averageCloud = Math.round(daylight.reduce((sum, hour) => sum + Number(hour.cloudCover ?? 0), 0) / daylight.length);
+  const peakRadiation = Math.max(...daylight.map((hour) => Number(hour.shortwaveRadiation ?? 0)));
+  if (averageCloud <= 25 && peakRadiation >= 550) return { label: "Strong solar window", detail: `${averageCloud}% avg cloud · peak ${Math.round(peakRadiation)} W/m²` };
+  if (averageCloud <= 50 && peakRadiation >= 350) return { label: "Useful solar window", detail: `${averageCloud}% avg cloud · peak ${Math.round(peakRadiation)} W/m²` };
+  if (averageCloud <= 75 || peakRadiation >= 180) return { label: "Patchy solar", detail: `${averageCloud}% avg cloud · peak ${Math.round(peakRadiation)} W/m²` };
+  return { label: "Poor solar window", detail: `${averageCloud}% avg cloud · peak ${Math.round(peakRadiation)} W/m²` };
+}
+
 function locationQueryVariants(query) {
   const cleaned = String(query || "").trim().replace(/\s+/g, " ");
   const variants = [];
@@ -336,9 +352,24 @@ async function readWeather(force = false) {
   const latitude = encodeURIComponent(config.location.latitude);
   const longitude = encodeURIComponent(config.location.longitude);
   const timezone = encodeURIComponent(config.location.timezone || "auto");
-  const url = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,rain,weather_code,wind_speed_10m&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&forecast_days=3&timezone=${timezone}`;
+  const hourly = "temperature_2m,apparent_temperature,precipitation_probability,cloud_cover,shortwave_radiation,is_day,weather_code";
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,rain,weather_code,wind_speed_10m,cloud_cover&hourly=${hourly}&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&forecast_days=3&timezone=${timezone}`;
   const data = await httpsJson(url);
   const currentCode = weatherCode(data.current?.weather_code);
+  const now = Date.now();
+  const hourlyForecast = (data.hourly?.time || [])
+    .map((time, index) => ({
+      time,
+      temperature: data.hourly.temperature_2m?.[index] ?? null,
+      apparentTemperature: data.hourly.apparent_temperature?.[index] ?? null,
+      rainChance: data.hourly.precipitation_probability?.[index] ?? null,
+      cloudCover: data.hourly.cloud_cover?.[index] ?? null,
+      shortwaveRadiation: data.hourly.shortwave_radiation?.[index] ?? null,
+      isDay: Boolean(data.hourly.is_day?.[index]),
+      ...weatherCode(data.hourly.weather_code?.[index])
+    }))
+    .filter((hour) => Date.parse(hour.time) >= now - 60 * 60 * 1000)
+    .slice(0, 12);
   const forecast = (data.daily?.time || []).map((date, index) => ({
     date,
     max: data.daily.temperature_2m_max?.[index] ?? null,
@@ -357,10 +388,14 @@ async function readWeather(force = false) {
       precipitation: data.current?.precipitation ?? null,
       rain: data.current?.rain ?? null,
       windSpeed: data.current?.wind_speed_10m ?? null,
+      cloudCover: data.current?.cloud_cover ?? null,
       isDay: Boolean(data.current?.is_day),
       ...currentCode
     },
+    hourly: hourlyForecast,
+    solar: solarOutlook(hourlyForecast),
     forecast,
+    googleWeatherUrl: googleWeatherUrl(config.location),
     fetchedAt: new Date().toISOString()
   };
   weatherCache = { cachedAt: Date.now(), value };

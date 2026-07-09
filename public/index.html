@@ -77,10 +77,30 @@
           <p class="eyebrow">Outside</p>
           <h2><span id="outsideTemp">—</span><sup>°C</sup></h2>
           <p id="weatherSummary">Add your location for forecast-aware comfort.</p>
+          <a class="google-weather-link" id="googleWeatherLink" href="https://www.google.com/search?q=weather" target="_blank" rel="noreferrer">Check Google weather</a>
         </div>
       </div>
-      <div class="weather-forecast" id="weatherForecast">
-        <div><strong>Weather</strong><span>Not configured</span></div>
+      <div class="weather-side">
+        <div class="solar-outlook" id="solarOutlook">
+          <strong>Solar outlook</strong>
+          <span>Waiting for cloud forecast</span>
+        </div>
+        <div class="weather-forecast" id="weatherForecast">
+          <div><strong>Weather</strong><span>Not configured</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="hourly-weather-card" id="hourlyWeatherCard" aria-label="12 hour weather and solar forecast">
+      <div class="section-heading compact-heading">
+        <div>
+          <p class="eyebrow">Solar planning</p>
+          <h2>Next 12 hours</h2>
+        </div>
+        <p id="hourlyWeatherSummary">Cloud cover drives solar generation.</p>
+      </div>
+      <div class="hourly-strip" id="hourlyForecast">
+        <div class="hourly-empty">Enable weather to see cloud cover and solar radiation.</div>
       </div>
     </section>
 
@@ -289,6 +309,6 @@
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <footer>AirTouch Local · Private by default</footer>
   </main>
-  <script src="/app.js?v=12"></script>
+  <script src="/app.js?v=13"></script>
 </body>
 </html>

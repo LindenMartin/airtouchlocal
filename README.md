@@ -41,6 +41,8 @@ The server listens on `127.0.0.1`, so the new UI is available only on this compu
 - Serialized UART requests to prevent overlapping controller commands
 - Temperature colour that moves from cold blue through comfortable tones to hot red
 - Outside weather card from Open-Meteo, configured by city/suburb lookup or latitude/longitude
+- Google Weather link-out for quickly cross-checking the selected location
+- 12-hour hourly cloud-cover and solar-radiation forecast for solar/ToU planning
 - Opt-in smart automation rules for AC power using indoor temperature thresholds
 - Configurable local browser notifications while the app is open, including a test button
 - Append-only smart event log for settings changes and automation decisions
@@ -89,6 +91,7 @@ by default and supports:
 - Minimum run and rest times to reduce rapid cycling
 - Opt-in browser notifications for spill, temperature thresholds, and power changes while the app is open
 - Forecast-aware dashboard context from Open-Meteo
+- Solar planning context: cloud cover and shortwave radiation for the next 12 hours
 
 Future integrations are intentionally modelled but not yet active:
 
