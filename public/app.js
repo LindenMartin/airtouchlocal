@@ -150,10 +150,20 @@ function applyTemperatureTheme(value) {
 }
 
 function temperatureHue(value) {
-  const clamped = Math.max(10, Math.min(35, value));
-  return clamped <= 20
-    ? Math.round(210 - ((clamped - 10) / 10) * 20)
-    : Math.round(190 - ((clamped - 20) / 15) * 184);
+  // 0–45°C perceptual scale: deep blue cold, green comfort around 20°C, red hot.
+  const stops = [
+    { temp: 0, hue: 225 },
+    { temp: 10, hue: 198 },
+    { temp: 20, hue: 145 },
+    { temp: 30, hue: 42 },
+    { temp: 45, hue: 4 }
+  ];
+  const clamped = Math.max(stops[0].temp, Math.min(stops.at(-1).temp, Number(value)));
+  const upper = stops.find((stop) => clamped <= stop.temp) || stops.at(-1);
+  const lower = stops[Math.max(0, stops.indexOf(upper) - 1)];
+  if (upper === lower) return upper.hue;
+  const ratio = (clamped - lower.temp) / (upper.temp - lower.temp);
+  return Math.round(lower.hue + (upper.hue - lower.hue) * ratio);
 }
 
 function formatTemperature(value) {

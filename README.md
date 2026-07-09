@@ -39,7 +39,7 @@ The server listens on `127.0.0.1`, so the new UI is available only on this compu
 - Prominent safety-spill indication, including the automatic opening percentage and an enabled zone switch
 - Live updates across connected browsers, with configurable 5–60 second fallback refresh
 - Serialized UART requests to prevent overlapping controller commands
-- Temperature colour that moves from cold blue through comfortable tones to hot red
+- Temperature colour across a 0–45°C scale: deep blue cold, green around 20°C comfort, amber warm, red hot
 - Outside weather card from Open-Meteo, configured by city/suburb lookup or latitude/longitude
 - Google Weather link-out for quickly cross-checking the selected location
 - 12-hour hourly cloud-cover and solar-radiation forecast for solar/ToU planning
