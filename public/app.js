@@ -257,8 +257,15 @@ function renderWeather() {
 }
 
 function hourWatts(hour) {
-  const watts = hour.effectiveWatts ?? (hour.isDay ? Number(hour.shortwaveRadiation ?? 0) : 0);
-  return Number.isFinite(watts) ? Math.max(0, watts) : 0;
+  if (hour.effectiveWatts != null && Number.isFinite(Number(hour.effectiveWatts))) {
+    return Math.max(0, Number(hour.effectiveWatts));
+  }
+  if (!hour.isDay) return 0;
+  const radiation = Number(hour.shortwaveRadiation ?? 0);
+  if (!Number.isFinite(radiation)) return 0;
+  const cloud = Math.min(100, Math.max(0, Number(hour.cloudCover ?? 0))) / 100;
+  const transmission = 0.2 + 0.8 * Math.pow(1 - cloud, 1.2);
+  return Math.max(0, Math.round(radiation * transmission));
 }
 
 function renderHourlySolarChart(hours) {
@@ -271,9 +278,9 @@ function renderHourlySolarChart(hours) {
   const watts = hours.map(hourWatts);
   const clouds = hours.map((hour) => Math.min(100, Math.max(0, Number(hour.cloudCover ?? 0))));
   const peak = Math.max(200, ...watts);
-  const width = 720;
-  const height = 220;
-  const pad = { top: 18, right: 44, bottom: 32, left: 44 };
+  const width = 760;
+  const height = 240;
+  const pad = { top: 20, right: 52, bottom: 36, left: 52 };
   const plotW = width - pad.left - pad.right;
   const plotH = height - pad.top - pad.bottom;
   const step = hours.length > 1 ? plotW / (hours.length - 1) : 0;
@@ -297,7 +304,7 @@ function renderHourlySolarChart(hours) {
       const end = hour.isDay ? index - 1 : index;
       const x1 = xAt(bandStart) - (bandStart === 0 ? 0 : step / 2);
       const x2 = xAt(end) + (end === hours.length - 1 ? 0 : step / 2);
-      nightBands.push(`<rect class="night-band" x="${Math.max(pad.left, x1).toFixed(1)}" y="${pad.top}" width="${Math.max(0, x2 - Math.max(pad.left, x1)).toFixed(1)}" height="${plotH}"></rect>`);
+      nightBands.push(`<rect class="night-band" x="${Math.max(pad.left, x1).toFixed(1)}" y="${pad.top}" width="${Math.max(0, x2 - Math.max(pad.left, x1)).toFixed(1)}" height="${plotH}" stroke="none"></rect>`);
       bandStart = null;
     }
   });
@@ -308,22 +315,22 @@ function renderHourlySolarChart(hours) {
     const y = yWatts(tick);
     return `
       <line class="watt-grid" x1="${pad.left}" x2="${width - pad.right}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" />
-      <text class="watt-axis" x="${pad.left - 8}" y="${(y + 3).toFixed(1)}" text-anchor="end">${tick}</text>`;
+      <text class="watt-axis" x="${pad.left - 10}" y="${(y + 4).toFixed(1)}" text-anchor="end">${tick}</text>`;
   }).join("");
   const cloudAxis = cloudTicks.map((tick) => {
     const y = yCloud(tick);
-    return `<text class="cloud-axis" x="${width - pad.right + 8}" y="${(y + 3).toFixed(1)}" text-anchor="start">${tick}%</text>`;
+    return `<text class="cloud-axis" x="${width - pad.right + 10}" y="${(y + 4).toFixed(1)}" text-anchor="start">${tick}%</text>`;
   }).join("");
   const hourLabels = hours.map((hour, index) => {
     if (index % 3 !== 0 && index !== hours.length - 1) return "";
-    return `<text class="watt-hour" x="${xAt(index).toFixed(1)}" y="${height - 8}" text-anchor="middle">${escapeHtml(formatHour(hour.time))}</text>`;
+    return `<text class="watt-hour" x="${xAt(index).toFixed(1)}" y="${height - 10}" text-anchor="middle">${escapeHtml(formatHour(hour.time))}</text>`;
   }).join("");
 
   elements.hourlyForecast.innerHTML = `
     <div class="hourly-chart" id="hourlyChart">
       <div class="hourly-chart-heading">
-        <strong>Solar wattage</strong>
-        <span>Hover a point for weather detail · night shaded</span>
+        <strong>Expected solar</strong>
+        <span>Cloud-adjusted W/m² · hover for detail</span>
       </div>
       <div class="hourly-chart-plot" id="hourlyChartPlot">
         <svg viewBox="0 0 ${width} ${height}" aria-hidden="true">
@@ -341,7 +348,7 @@ function renderHourlySolarChart(hours) {
         <div class="hour-tooltip" id="hourTooltip" hidden></div>
       </div>
       <div class="solar-wattage-legend">
-        <span class="legend-watts">Wattage (W/m²)</span>
+        <span class="legend-watts">Expected W/m²</span>
         <span class="legend-cloud">Cloud cover %</span>
       </div>
     </div>`;
@@ -374,7 +381,7 @@ function renderHourlySolarChart(hours) {
       <span class="hour-icon">${escapeHtml(hour.icon || "🌡️")}</span>
       <span class="hour-temp">${formatTemperature(hour.temperature)}°C</span>
       <small>${hour.cloudCover ?? "—"}% cloud</small>
-      <small>${Math.round(wattsValue)} W/m²</small>
+      <small>${Math.round(wattsValue)} W/m² expected</small>
       <small>${escapeHtml(hour.label || "")}</small>`;
     const ratio = hours.length > 1 ? index / (hours.length - 1) : 0;
     const tipPercent = Math.min(88, Math.max(12, (pad.left + ratio * plotW) / width * 100));

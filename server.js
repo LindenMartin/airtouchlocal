@@ -303,12 +303,18 @@ function weatherCode(code, isDay = true) {
   return { icon: "🌡️", label: "Weather" };
 }
 
-/** Usable irradiance (W/m²). Night is 0; daylight uses Open-Meteo shortwave (already cloud-attenuated). */
+/** Expected irradiance (W/m²): night is 0; daylight shortwave derated by cloud cover. */
+function cloudTransmission(cloudCover) {
+  const cloud = Math.min(100, Math.max(0, Number(cloudCover) || 0)) / 100;
+  // Clear keeps full irradiance; overcast keeps ~20% diffuse. Mid cloud bites harder than linear.
+  return 0.2 + 0.8 * Math.pow(1 - cloud, 1.2);
+}
+
 function effectiveSolarWatts(hour) {
   if (!hour?.isDay) return 0;
   const radiation = Number(hour.shortwaveRadiation);
   if (!Number.isFinite(radiation)) return null;
-  return Math.max(0, Math.round(radiation));
+  return Math.max(0, Math.round(radiation * cloudTransmission(hour.cloudCover)));
 }
 
 function googleWeatherUrl(location) {
@@ -321,10 +327,10 @@ function solarOutlook(hours) {
   if (!daylight.length) return { label: "Night", detail: "No solar generation expected in this window." };
   const averageCloud = Math.round(daylight.reduce((sum, hour) => sum + Number(hour.cloudCover ?? 0), 0) / daylight.length);
   const peakWatts = Math.max(...daylight.map((hour) => Number(hour.effectiveWatts ?? hour.shortwaveRadiation ?? 0)));
-  if (averageCloud <= 25 && peakWatts >= 550) return { label: "Strong solar window", detail: `${averageCloud}% avg cloud · peak ${Math.round(peakWatts)} W/m²` };
-  if (averageCloud <= 50 && peakWatts >= 350) return { label: "Useful solar window", detail: `${averageCloud}% avg cloud · peak ${Math.round(peakWatts)} W/m²` };
-  if (averageCloud <= 75 || peakWatts >= 180) return { label: "Patchy solar", detail: `${averageCloud}% avg cloud · peak ${Math.round(peakWatts)} W/m²` };
-  return { label: "Poor solar window", detail: `${averageCloud}% avg cloud · peak ${Math.round(peakWatts)} W/m²` };
+  if (averageCloud <= 25 && peakWatts >= 450) return { label: "Strong solar window", detail: `${averageCloud}% avg cloud · peak ${Math.round(peakWatts)} W/m² expected` };
+  if (averageCloud <= 50 && peakWatts >= 280) return { label: "Useful solar window", detail: `${averageCloud}% avg cloud · peak ${Math.round(peakWatts)} W/m² expected` };
+  if (averageCloud <= 75 || peakWatts >= 140) return { label: "Patchy solar", detail: `${averageCloud}% avg cloud · peak ${Math.round(peakWatts)} W/m² expected` };
+  return { label: "Poor solar window", detail: `${averageCloud}% avg cloud · peak ${Math.round(peakWatts)} W/m² expected` };
 }
 
 function locationQueryVariants(query) {

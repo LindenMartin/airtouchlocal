@@ -396,18 +396,18 @@ h2 { margin-bottom: 0; letter-spacing: -.035em; font-weight: 590; }
 }
 .hourly-chart-heading strong {
   color: var(--orange);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 650;
 }
 .hourly-chart-heading span {
-  color: var(--muted);
-  font-size: 11px;
+  color: #b7c7bf;
+  font-size: 12px;
   text-align: right;
 }
 .hourly-chart-plot {
   position: relative;
   width: 100%;
-  min-height: 220px;
+  min-height: 240px;
   cursor: crosshair;
   touch-action: none;
 }
@@ -415,18 +415,20 @@ h2 { margin-bottom: 0; letter-spacing: -.035em; font-weight: 590; }
   display: block;
   width: 100%;
   height: auto;
-  aspect-ratio: 720 / 220;
+  aspect-ratio: 760 / 240;
 }
 .night-band {
-  fill: rgba(105,184,255,.06);
+  fill: rgba(105,184,255,.08);
+  stroke: none;
 }
 .watt-grid {
-  stroke: rgba(255,255,255,.06);
+  stroke: rgba(255,255,255,.08);
   stroke-width: 1;
 }
 .watt-axis, .cloud-axis, .watt-hour {
-  fill: var(--muted);
-  font-size: 9px;
+  fill: #d5e2db;
+  font-size: 12px;
+  font-weight: 600;
 }
 .watt-area {
   fill: rgba(255,181,109,.14);
@@ -490,9 +492,10 @@ h2 { margin-bottom: 0; letter-spacing: -.035em; font-weight: 590; }
 .solar-wattage-legend {
   display: flex;
   gap: 16px;
-  margin-top: 8px;
-  color: var(--muted);
-  font-size: 10px;
+  margin-top: 10px;
+  color: #c9d7d0;
+  font-size: 12px;
+  font-weight: 550;
 }
 .legend-watts::before,
 .legend-cloud::before {
