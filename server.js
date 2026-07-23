@@ -289,17 +289,26 @@ function weatherHint(pathname) {
   return `Check that ${AIRCON_HOST} is reachable and AIRCON_USER/AIRCON_PASSWORD are correct.`;
 }
 
-function weatherCode(code) {
+function weatherCode(code, isDay = true) {
   const value = Number(code);
-  if ([0].includes(value)) return { icon: "☀️", label: "Clear" };
-  if ([1, 2].includes(value)) return { icon: "🌤️", label: "Partly cloudy" };
+  const day = isDay !== false;
+  if ([0].includes(value)) return { icon: day ? "☀️" : "🌙", label: "Clear" };
+  if ([1, 2].includes(value)) return { icon: day ? "🌤️" : "🌙", label: "Partly cloudy" };
   if ([3].includes(value)) return { icon: "☁️", label: "Cloudy" };
   if ([45, 48].includes(value)) return { icon: "🌫️", label: "Fog" };
-  if ([51, 53, 55, 56, 57].includes(value)) return { icon: "🌦️", label: "Drizzle" };
+  if ([51, 53, 55, 56, 57].includes(value)) return { icon: day ? "🌦️" : "🌧️", label: "Drizzle" };
   if ([61, 63, 65, 66, 67, 80, 81, 82].includes(value)) return { icon: "🌧️", label: "Rain" };
   if ([71, 73, 75, 77, 85, 86].includes(value)) return { icon: "🌨️", label: "Snow" };
   if ([95, 96, 99].includes(value)) return { icon: "⛈️", label: "Storm" };
   return { icon: "🌡️", label: "Weather" };
+}
+
+/** Usable irradiance (W/m²). Night is 0; daylight uses Open-Meteo shortwave (already cloud-attenuated). */
+function effectiveSolarWatts(hour) {
+  if (!hour?.isDay) return 0;
+  const radiation = Number(hour.shortwaveRadiation);
+  if (!Number.isFinite(radiation)) return null;
+  return Math.max(0, Math.round(radiation));
 }
 
 function googleWeatherUrl(location) {
@@ -311,11 +320,11 @@ function solarOutlook(hours) {
   const daylight = hours.filter((hour) => hour.isDay);
   if (!daylight.length) return { label: "Night", detail: "No solar generation expected in this window." };
   const averageCloud = Math.round(daylight.reduce((sum, hour) => sum + Number(hour.cloudCover ?? 0), 0) / daylight.length);
-  const peakRadiation = Math.max(...daylight.map((hour) => Number(hour.shortwaveRadiation ?? 0)));
-  if (averageCloud <= 25 && peakRadiation >= 550) return { label: "Strong solar window", detail: `${averageCloud}% avg cloud · peak ${Math.round(peakRadiation)} W/m²` };
-  if (averageCloud <= 50 && peakRadiation >= 350) return { label: "Useful solar window", detail: `${averageCloud}% avg cloud · peak ${Math.round(peakRadiation)} W/m²` };
-  if (averageCloud <= 75 || peakRadiation >= 180) return { label: "Patchy solar", detail: `${averageCloud}% avg cloud · peak ${Math.round(peakRadiation)} W/m²` };
-  return { label: "Poor solar window", detail: `${averageCloud}% avg cloud · peak ${Math.round(peakRadiation)} W/m²` };
+  const peakWatts = Math.max(...daylight.map((hour) => Number(hour.effectiveWatts ?? hour.shortwaveRadiation ?? 0)));
+  if (averageCloud <= 25 && peakWatts >= 550) return { label: "Strong solar window", detail: `${averageCloud}% avg cloud · peak ${Math.round(peakWatts)} W/m²` };
+  if (averageCloud <= 50 && peakWatts >= 350) return { label: "Useful solar window", detail: `${averageCloud}% avg cloud · peak ${Math.round(peakWatts)} W/m²` };
+  if (averageCloud <= 75 || peakWatts >= 180) return { label: "Patchy solar", detail: `${averageCloud}% avg cloud · peak ${Math.round(peakWatts)} W/m²` };
+  return { label: "Poor solar window", detail: `${averageCloud}% avg cloud · peak ${Math.round(peakWatts)} W/m²` };
 }
 
 function locationQueryVariants(query) {
@@ -355,19 +364,25 @@ async function readWeather(force = false) {
   const hourly = "temperature_2m,apparent_temperature,precipitation_probability,cloud_cover,shortwave_radiation,is_day,weather_code";
   const url = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,rain,weather_code,wind_speed_10m,cloud_cover&hourly=${hourly}&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&forecast_days=3&timezone=${timezone}`;
   const data = await httpsJson(url);
-  const currentCode = weatherCode(data.current?.weather_code);
+  const currentIsDay = Boolean(data.current?.is_day);
+  const currentCode = weatherCode(data.current?.weather_code, currentIsDay);
   const currentTime = data.current?.time;
   const hourlyForecast = (data.hourly?.time || [])
-    .map((time, index) => ({
-      time,
-      temperature: data.hourly.temperature_2m?.[index] ?? null,
-      apparentTemperature: data.hourly.apparent_temperature?.[index] ?? null,
-      rainChance: data.hourly.precipitation_probability?.[index] ?? null,
-      cloudCover: data.hourly.cloud_cover?.[index] ?? null,
-      shortwaveRadiation: data.hourly.shortwave_radiation?.[index] ?? null,
-      isDay: Boolean(data.hourly.is_day?.[index]),
-      ...weatherCode(data.hourly.weather_code?.[index])
-    }))
+    .map((time, index) => {
+      const isDay = Boolean(data.hourly.is_day?.[index]);
+      const hour = {
+        time,
+        temperature: data.hourly.temperature_2m?.[index] ?? null,
+        apparentTemperature: data.hourly.apparent_temperature?.[index] ?? null,
+        rainChance: data.hourly.precipitation_probability?.[index] ?? null,
+        cloudCover: data.hourly.cloud_cover?.[index] ?? null,
+        shortwaveRadiation: data.hourly.shortwave_radiation?.[index] ?? null,
+        isDay,
+        ...weatherCode(data.hourly.weather_code?.[index], isDay)
+      };
+      hour.effectiveWatts = effectiveSolarWatts(hour);
+      return hour;
+    })
     .filter((hour) => currentTime ? hour.time > currentTime : Date.parse(hour.time) > Date.now())
     .slice(0, 12);
   const forecast = (data.daily?.time || []).map((date, index) => ({
@@ -375,7 +390,7 @@ async function readWeather(force = false) {
     max: data.daily.temperature_2m_max?.[index] ?? null,
     min: data.daily.temperature_2m_min?.[index] ?? null,
     rainChance: data.daily.precipitation_probability_max?.[index] ?? null,
-    ...weatherCode(data.daily.weather_code?.[index])
+    ...weatherCode(data.daily.weather_code?.[index], true)
   }));
   const value = {
     enabled: true,
@@ -389,7 +404,7 @@ async function readWeather(force = false) {
       rain: data.current?.rain ?? null,
       windSpeed: data.current?.wind_speed_10m ?? null,
       cloudCover: data.current?.cloud_cover ?? null,
-      isDay: Boolean(data.current?.is_day),
+      isDay: currentIsDay,
       ...currentCode
     },
     hourly: hourlyForecast,
