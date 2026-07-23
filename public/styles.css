@@ -368,87 +368,125 @@ h2 { margin-bottom: 0; letter-spacing: -.035em; font-weight: 590; }
 }
 .compact-heading { margin-bottom: 14px; }
 .compact-heading h2 { font-size: 22px; }
-.hourly-strip {
-  display: grid;
-  grid-auto-columns: minmax(92px, 1fr);
-  grid-auto-flow: column;
-  gap: 10px;
-  overflow-x: auto;
-  padding-bottom: 3px;
+.hourly-forecast {
+  position: relative;
 }
-.hour-card, .hourly-empty {
-  min-width: 92px;
-  padding: 13px 12px;
+.hourly-empty {
+  padding: 18px 12px;
   border: 1px solid var(--line);
   border-radius: 15px;
   background: rgba(255,255,255,.02);
-}
-.hour-card.day { border-color: rgba(255,181,109,.16); }
-.hour-card.night { border-color: rgba(105,184,255,.12); }
-.hour-card strong, .hour-card span, .hour-card small { display: block; }
-.hour-card strong { font-size: 12px; font-weight: 650; }
-.hour-icon { margin: 8px 0 6px; font-size: 20px; }
-.hour-temp {
-  color: hsl(var(--temp-hue) 82% 70%);
-  font-size: 14px;
-  font-weight: 650;
-  text-shadow: 0 0 18px hsl(var(--temp-hue) 90% 62% / .16);
-}
-.hour-card small { margin-top: 4px; color: var(--muted); font-size: 10px; }
-.hourly-empty {
-  grid-column: 1 / -1;
   color: var(--muted);
   font-size: 12px;
   text-align: center;
 }
 
-.solar-wattage {
-  margin-top: 16px;
+.hourly-chart {
   padding: 14px 14px 12px;
   border: 1px solid rgba(255,181,109,.14);
   border-radius: 16px;
   background: rgba(0,0,0,.16);
 }
-.solar-wattage-heading {
+.hourly-chart-heading {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 10px;
 }
-.solar-wattage-heading strong {
+.hourly-chart-heading strong {
   color: var(--orange);
   font-size: 13px;
   font-weight: 650;
 }
-.solar-wattage-heading span {
+.hourly-chart-heading span {
   color: var(--muted);
   font-size: 11px;
   text-align: right;
 }
-.solar-wattage-plot {
+.hourly-chart-plot {
+  position: relative;
   width: 100%;
-  min-height: 148px;
+  min-height: 220px;
+  cursor: crosshair;
+  touch-action: none;
 }
-.solar-wattage-plot svg {
+.hourly-chart-plot svg {
   display: block;
   width: 100%;
-  height: 148px;
+  height: auto;
+  aspect-ratio: 720 / 220;
+}
+.night-band {
+  fill: rgba(105,184,255,.06);
 }
 .watt-grid {
   stroke: rgba(255,255,255,.06);
   stroke-width: 1;
 }
-.watt-axis, .watt-hour {
+.watt-axis, .cloud-axis, .watt-hour {
   fill: var(--muted);
   font-size: 9px;
 }
-.cloud-line {
-  stroke: rgba(105,184,255,.85);
-  stroke-width: 2;
+.watt-area {
+  fill: rgba(255,181,109,.14);
+}
+.watt-line {
+  stroke: rgba(255,181,109,.95);
+  stroke-width: 2.5;
   stroke-linejoin: round;
   stroke-linecap: round;
 }
+.cloud-line {
+  stroke: rgba(105,184,255,.9);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  stroke-dasharray: 4 3;
+}
+.chart-scrubber {
+  stroke: rgba(241,247,243,.35);
+  stroke-width: 1;
+  pointer-events: none;
+}
+.watt-dot {
+  fill: var(--orange);
+  stroke: #0d171b;
+  stroke-width: 1.5;
+  pointer-events: none;
+}
+.cloud-dot {
+  fill: rgba(105,184,255,.95);
+  stroke: #0d171b;
+  stroke-width: 1.5;
+  pointer-events: none;
+}
+.hour-tooltip {
+  position: absolute;
+  top: 18px;
+  z-index: 2;
+  min-width: 96px;
+  padding: 12px 12px 10px;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: rgba(16, 28, 33, .96);
+  box-shadow: 0 12px 30px rgba(0,0,0,.35);
+  pointer-events: none;
+}
+.hour-tooltip.day { border-color: rgba(255,181,109,.28); }
+.hour-tooltip.night { border-color: rgba(105,184,255,.24); }
+.hour-tooltip strong,
+.hour-tooltip span,
+.hour-tooltip small { display: block; }
+.hour-tooltip strong { font-size: 12px; font-weight: 650; }
+.hour-tooltip .hour-icon { margin: 8px 0 6px; font-size: 20px; }
+.hour-tooltip .hour-temp {
+  color: hsl(var(--temp-hue) 82% 70%);
+  font-size: 14px;
+  font-weight: 650;
+  text-shadow: 0 0 18px hsl(var(--temp-hue) 90% 62% / .16);
+}
+.hour-tooltip small { margin-top: 4px; color: var(--muted); font-size: 10px; }
 .solar-wattage-legend {
   display: flex;
   gap: 16px;

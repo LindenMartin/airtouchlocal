@@ -384,7 +384,7 @@ async function readWeather(force = false) {
       return hour;
     })
     .filter((hour) => currentTime ? hour.time > currentTime : Date.parse(hour.time) > Date.now())
-    .slice(0, 12);
+    .slice(0, 24);
   const forecast = (data.daily?.time || []).map((date, index) => ({
     date,
     max: data.daily.temperature_2m_max?.[index] ?? null,
