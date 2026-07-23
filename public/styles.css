@@ -446,6 +446,8 @@ h2 { margin-bottom: 0; letter-spacing: -.035em; font-weight: 590; }
   width: 100%;
   height: auto;
   aspect-ratio: 780 / 250;
+  text-rendering: geometricPrecision;
+  shape-rendering: geometricPrecision;
 }
 .night-band {
   fill: rgba(105,184,255,.08);
@@ -456,9 +458,15 @@ h2 { margin-bottom: 0; letter-spacing: -.035em; font-weight: 590; }
   stroke-width: 1;
 }
 .watt-axis, .cloud-axis, .watt-hour {
-  fill: #d5e2db;
-  font-size: 12px;
-  font-weight: 600;
+  fill: #9eb0a8;
+  stroke: #0d171b;
+  stroke-width: 2.5px;
+  stroke-linejoin: round;
+  paint-order: stroke fill;
+  font-weight: 500;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  text-shadow: none !important;
+  filter: none !important;
 }
 .watt-area {
   fill: rgba(255,181,109,.14);

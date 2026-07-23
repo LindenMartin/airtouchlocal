@@ -453,17 +453,17 @@ function renderHourlySolarChart(hours, options = {}) {
     const y = ySeries(tick);
     return `
       <line class="watt-grid" x1="${pad.left}" x2="${width - pad.right}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" />
-      <text class="watt-axis" x="${pad.left - 10}" y="${(y + 4).toFixed(1)}" text-anchor="end">${formatTick(tick)}</text>`;
+      <text class="watt-axis" x="${pad.left - 10}" y="${(y + 4).toFixed(1)}" text-anchor="end" font-size="11">${formatTick(tick)}</text>`;
   }).join("");
   const cloudAxis = cloudTicks.map((tick) => {
     const y = yCloud(tick);
-    return `<text class="cloud-axis" x="${width - pad.right + 10}" y="${(y + 4).toFixed(1)}" text-anchor="start">${tick}%</text>`;
+    return `<text class="cloud-axis" x="${width - pad.right + 10}" y="${(y + 4).toFixed(1)}" text-anchor="start" font-size="11">${tick}%</text>`;
   }).join("");
   const hourLabels = hours.map((hour, index) => {
     const hourMatch = String(hour.time || "").match(/T(\d{2}):/);
     const hourNum = hourMatch ? Number(hourMatch[1]) : index;
     if (hourNum % 3 !== 0) return "";
-    return `<text class="watt-hour" x="${xAt(index).toFixed(1)}" y="${height - 10}" text-anchor="middle">${escapeHtml(formatHour(hour.time))}</text>`;
+    return `<text class="watt-hour" x="${xAt(index).toFixed(1)}" y="${height - 10}" text-anchor="middle" font-size="11">${escapeHtml(formatHour(hour.time))}</text>`;
   }).join("");
 
   const totalKwh = options.dayTotalKwh;
