@@ -97,7 +97,10 @@ const defaultSmartConfig = {
     },
     solarBattery: {
       enabled: false,
-      note: "Future input for cheap/available solar energy and battery state."
+      tiltDegrees: 25,
+      panels: { n: 0, e: 0, s: 0, w: 0 },
+      systemEfficiency: 0.85,
+      note: "Panel watts by roof face plus shared tilt; used to estimate generation from the forecast."
     }
   }
 };
@@ -210,7 +213,18 @@ function normalizeSmartConfig(value) {
   config.automation.evaluateOnRefresh = Boolean(config.automation.evaluateOnRefresh);
   config.automation.activeRule = ["cooling", "heating"].includes(config.automation.activeRule) ? config.automation.activeRule : null;
   config.integrations.ecowitt.enabled = Boolean(config.integrations.ecowitt.enabled);
-  config.integrations.solarBattery.enabled = Boolean(config.integrations.solarBattery.enabled);
+  const panels = config.integrations.solarBattery.panels || {};
+  config.integrations.solarBattery.panels = {
+    n: clampInteger(panels.n, 0, 100000, 0),
+    e: clampInteger(panels.e, 0, 100000, 0),
+    s: clampInteger(panels.s, 0, 100000, 0),
+    w: clampInteger(panels.w, 0, 100000, 0)
+  };
+  config.integrations.solarBattery.tiltDegrees = clampInteger(config.integrations.solarBattery.tiltDegrees, 0, 60, 25);
+  config.integrations.solarBattery.systemEfficiency = 0.85;
+  const panelWattsTotal = Object.values(config.integrations.solarBattery.panels).reduce((sum, watts) => sum + watts, 0);
+  config.integrations.solarBattery.enabled = panelWattsTotal > 0;
+  config.integrations.solarBattery.note = String(config.integrations.solarBattery.note || defaultSmartConfig.integrations.solarBattery.note).slice(0, 200);
   return config;
 }
 
@@ -229,6 +243,7 @@ function clampInteger(value, min, max, fallback) {
 function writeSmartConfig(value) {
   const config = normalizeSmartConfig(value);
   fs.writeFileSync(SMART_CONFIG_FILE, JSON.stringify(config, null, 2));
+  weatherCache = null;
   broadcastNamedEvent("smart-config", config);
   return config;
 }
@@ -317,20 +332,159 @@ function effectiveSolarWatts(hour) {
   return Math.max(0, Math.round(radiation * cloudTransmission(hour.cloudCover)));
 }
 
+const FACE_AZIMUTH = { n: 0, e: 90, s: 180, w: 270 };
+
+/** Approximate solar elevation (deg) and azimuth (deg from north, clockwise). */
+function solarPosition(latitude, longitude, timeIso) {
+  const match = String(timeIso || "").match(/(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+  if (!match || latitude == null || longitude == null) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const rad = Math.PI / 180;
+  const dayOfYear = Math.floor((Date.UTC(year, month - 1, day) - Date.UTC(year, 0, 0)) / 86_400_000);
+  // Open-Meteo hourly times are location-local wall clock; estimate LST from longitude.
+  const tzHours = Math.round(Number(longitude) / 15);
+  const minutes = hour * 60 + minute;
+  const gamma = (2 * Math.PI / 365) * (dayOfYear - 1 + (minutes / 60 - 12) / 24);
+  const decl = 0.006918
+    - 0.399912 * Math.cos(gamma)
+    + 0.070257 * Math.sin(gamma)
+    - 0.006758 * Math.cos(2 * gamma)
+    + 0.000907 * Math.sin(2 * gamma)
+    - 0.002697 * Math.cos(3 * gamma)
+    + 0.00148 * Math.sin(3 * gamma);
+  const eqTime = 229.18 * (0.000075
+    + 0.001868 * Math.cos(gamma)
+    - 0.032077 * Math.sin(gamma)
+    - 0.014615 * Math.cos(2 * gamma)
+    - 0.040849 * Math.sin(2 * gamma));
+  const timeCorrection = eqTime + 4 * (Number(longitude) - tzHours * 15);
+  const solarTime = minutes + timeCorrection;
+  const hourAngle = (solarTime / 4 - 180) * rad;
+  const lat = Number(latitude) * rad;
+  const cosZenith = Math.sin(lat) * Math.sin(decl) + Math.cos(lat) * Math.cos(decl) * Math.cos(hourAngle);
+  const zenith = Math.acos(Math.min(1, Math.max(-1, cosZenith)));
+  const elevation = 90 - zenith / rad;
+  const azimuthNum = -Math.sin(hourAngle);
+  const azimuthDen = Math.tan(decl) * Math.cos(lat) - Math.sin(lat) * Math.cos(hourAngle);
+  let azimuth = Math.atan2(azimuthNum, azimuthDen) / rad;
+  azimuth = (azimuth + 360) % 360;
+  return { elevation, azimuth };
+}
+
+function planeOfArrayFactor(sun, panelAzimuthDeg, tiltDeg) {
+  if (!sun || sun.elevation <= 0) return 0;
+  const rad = Math.PI / 180;
+  const elev = sun.elevation * rad;
+  const sunAz = sun.azimuth * rad;
+  const panelAz = panelAzimuthDeg * rad;
+  const tilt = tiltDeg * rad;
+  const cosInc = Math.sin(elev) * Math.cos(tilt)
+    + Math.cos(elev) * Math.sin(tilt) * Math.cos(sunAz - panelAz);
+  const incidence = Math.max(0, cosInc);
+  const sinElev = Math.max(Math.sin(elev), 0.05);
+  // Relative to horizontal GHI: beam on tilted plane vs horizontal.
+  return Math.min(1.4, Math.max(0, incidence / sinElev));
+}
+
+function panelsConfigured(solarBattery) {
+  const panels = solarBattery?.panels || {};
+  return ["n", "e", "s", "w"].some((face) => Number(panels[face] || 0) > 0);
+}
+
+function estimateHourGeneration(hour, config) {
+  const solarBattery = config.integrations?.solarBattery;
+  if (!panelsConfigured(solarBattery)) {
+    return { estimatedWatts: null, estimatedKwh: null, faceWatts: null };
+  }
+  if (config.location?.latitude == null || config.location?.longitude == null) {
+    return { estimatedWatts: null, estimatedKwh: null, faceWatts: null };
+  }
+  const ghi = Number(hour.effectiveWatts);
+  if (!hour.isDay || !Number.isFinite(ghi) || ghi <= 0) {
+    return { estimatedWatts: 0, estimatedKwh: 0, faceWatts: { n: 0, e: 0, s: 0, w: 0 } };
+  }
+  const sun = solarPosition(config.location.latitude, config.location.longitude, hour.time);
+  if (!sun || sun.elevation <= 0) {
+    return { estimatedWatts: 0, estimatedKwh: 0, faceWatts: { n: 0, e: 0, s: 0, w: 0 } };
+  }
+  const tilt = Number(solarBattery.tiltDegrees ?? 25);
+  const efficiency = Number(solarBattery.systemEfficiency ?? 0.85);
+  const faceWatts = {};
+  let total = 0;
+  for (const face of ["n", "e", "s", "w"]) {
+    const panelW = Number(solarBattery.panels[face] || 0);
+    if (panelW <= 0) {
+      faceWatts[face] = 0;
+      continue;
+    }
+    const factor = planeOfArrayFactor(sun, FACE_AZIMUTH[face], tilt);
+    const watts = panelW * (ghi / 1000) * factor * efficiency;
+    faceWatts[face] = Math.round(watts);
+    total += watts;
+  }
+  const estimatedWatts = Math.round(total);
+  return {
+    estimatedWatts,
+    estimatedKwh: Math.round((estimatedWatts / 1000) * 1000) / 1000,
+    faceWatts
+  };
+}
+
+function attachPanelGeneration(hours, config) {
+  const configured = panelsConfigured(config.integrations?.solarBattery)
+    && config.location?.latitude != null
+    && config.location?.longitude != null;
+  let estimatedKwhTotal = 0;
+  const enriched = hours.map((hour) => {
+    const generation = estimateHourGeneration(hour, config);
+    if (configured && generation.estimatedKwh != null) estimatedKwhTotal += generation.estimatedKwh;
+    return {
+      ...hour,
+      estimatedWatts: generation.estimatedWatts,
+      estimatedKwh: generation.estimatedKwh,
+      faceWatts: generation.faceWatts
+    };
+  });
+  return {
+    hours: enriched,
+    panelsConfigured: configured,
+    estimatedKwhTotal: configured ? Math.round(estimatedKwhTotal * 100) / 100 : null
+  };
+}
+
 function googleWeatherUrl(location) {
   const label = location?.name || [location?.latitude, location?.longitude].filter((value) => value != null).join(",");
   return `https://www.google.com/search?q=${encodeURIComponent(`weather ${label || "near me"}`)}`;
 }
 
-function solarOutlook(hours) {
+function solarOutlook(hours, extras = {}) {
   const daylight = hours.filter((hour) => hour.isDay);
-  if (!daylight.length) return { label: "Night", detail: "No solar generation expected in this window." };
+  const base = {
+    panelsConfigured: Boolean(extras.panelsConfigured),
+    estimatedKwhTotal: extras.estimatedKwhTotal ?? null
+  };
+  if (!daylight.length) {
+    return { label: "Night", detail: "No solar generation expected in this window.", ...base };
+  }
   const averageCloud = Math.round(daylight.reduce((sum, hour) => sum + Number(hour.cloudCover ?? 0), 0) / daylight.length);
+  if (base.panelsConfigured && base.estimatedKwhTotal != null) {
+    const total = base.estimatedKwhTotal;
+    const peakKw = Math.max(...hours.map((hour) => Number(hour.estimatedWatts ?? 0))) / 1000;
+    const detail = `${averageCloud}% avg cloud · ~${total.toFixed(1)} kWh next 24h · peak ${peakKw.toFixed(1)} kW`;
+    if (total >= 12 && averageCloud <= 40) return { label: "Strong solar window", detail, ...base };
+    if (total >= 6) return { label: "Useful solar window", detail, ...base };
+    if (total >= 2) return { label: "Patchy solar", detail, ...base };
+    return { label: "Poor solar window", detail, ...base };
+  }
   const peakWatts = Math.max(...daylight.map((hour) => Number(hour.effectiveWatts ?? hour.shortwaveRadiation ?? 0)));
-  if (averageCloud <= 25 && peakWatts >= 450) return { label: "Strong solar window", detail: `${averageCloud}% avg cloud · peak ${Math.round(peakWatts)} W/m² expected` };
-  if (averageCloud <= 50 && peakWatts >= 280) return { label: "Useful solar window", detail: `${averageCloud}% avg cloud · peak ${Math.round(peakWatts)} W/m² expected` };
-  if (averageCloud <= 75 || peakWatts >= 140) return { label: "Patchy solar", detail: `${averageCloud}% avg cloud · peak ${Math.round(peakWatts)} W/m² expected` };
-  return { label: "Poor solar window", detail: `${averageCloud}% avg cloud · peak ${Math.round(peakWatts)} W/m² expected` };
+  if (averageCloud <= 25 && peakWatts >= 450) return { label: "Strong solar window", detail: `${averageCloud}% avg cloud · peak ${Math.round(peakWatts)} W/m² expected`, ...base };
+  if (averageCloud <= 50 && peakWatts >= 280) return { label: "Useful solar window", detail: `${averageCloud}% avg cloud · peak ${Math.round(peakWatts)} W/m² expected`, ...base };
+  if (averageCloud <= 75 || peakWatts >= 140) return { label: "Patchy solar", detail: `${averageCloud}% avg cloud · peak ${Math.round(peakWatts)} W/m² expected`, ...base };
+  return { label: "Poor solar window", detail: `${averageCloud}% avg cloud · peak ${Math.round(peakWatts)} W/m² expected`, ...base };
 }
 
 function locationQueryVariants(query) {
@@ -391,6 +545,7 @@ async function readWeather(force = false) {
     })
     .filter((hour) => currentTime ? hour.time > currentTime : Date.parse(hour.time) > Date.now())
     .slice(0, 24);
+  const generation = attachPanelGeneration(hourlyForecast, config);
   const forecast = (data.daily?.time || []).map((date, index) => ({
     date,
     max: data.daily.temperature_2m_max?.[index] ?? null,
@@ -413,8 +568,11 @@ async function readWeather(force = false) {
       isDay: currentIsDay,
       ...currentCode
     },
-    hourly: hourlyForecast,
-    solar: solarOutlook(hourlyForecast),
+    hourly: generation.hours,
+    solar: solarOutlook(generation.hours, {
+      panelsConfigured: generation.panelsConfigured,
+      estimatedKwhTotal: generation.estimatedKwhTotal
+    }),
     forecast,
     googleWeatherUrl: googleWeatherUrl(config.location),
     fetchedAt: new Date().toISOString()

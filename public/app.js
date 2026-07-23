@@ -46,7 +46,14 @@ const elements = {
   refreshInterval: document.querySelector("#refreshInterval"),
   requestNotificationsButton: document.querySelector("#requestNotificationsButton"),
   saveAutomationButton: document.querySelector("#saveAutomationButton"),
+  saveSolarPanelsButton: document.querySelector("#saveSolarPanelsButton"),
   saveWeatherButton: document.querySelector("#saveWeatherButton"),
+  panelTilt: document.querySelector("#panelTilt"),
+  panelWattsE: document.querySelector("#panelWattsE"),
+  panelWattsN: document.querySelector("#panelWattsN"),
+  panelWattsS: document.querySelector("#panelWattsS"),
+  panelWattsW: document.querySelector("#panelWattsW"),
+  solarPanelsStatus: document.querySelector("#solarPanelsStatus"),
   settingsButton: document.querySelector("#settingsButton"),
   settingsCloseButton: document.querySelector("#settingsCloseButton"),
   settingsConnection: document.querySelector("#settingsConnection"),
@@ -268,6 +275,23 @@ function hourWatts(hour) {
   return Math.max(0, Math.round(radiation * transmission));
 }
 
+function hourGenerationKwh(hour) {
+  const value = Number(hour.estimatedKwh);
+  return Number.isFinite(value) ? Math.max(0, value) : 0;
+}
+
+function formatFaceSplit(faceWatts) {
+  if (!faceWatts) return "";
+  const parts = [
+    ["N", faceWatts.n],
+    ["E", faceWatts.e],
+    ["S", faceWatts.s],
+    ["W", faceWatts.w]
+  ].filter(([, watts]) => Number(watts) > 0)
+    .map(([face, watts]) => `${face} ${Math.round(watts)}W`);
+  return parts.length ? parts.join(" · ") : "";
+}
+
 function renderHourlySolarChart(hours) {
   if (!elements.hourlyForecast) return;
   if (!hours.length) {
@@ -275,9 +299,12 @@ function renderHourlySolarChart(hours) {
     return;
   }
 
-  const watts = hours.map(hourWatts);
+  const useGeneration = Boolean(weather?.solar?.panelsConfigured);
+  const series = useGeneration ? hours.map(hourGenerationKwh) : hours.map(hourWatts);
   const clouds = hours.map((hour) => Math.min(100, Math.max(0, Number(hour.cloudCover ?? 0))));
-  const peak = Math.max(200, ...watts);
+  const peak = useGeneration
+    ? Math.max(0.5, ...series)
+    : Math.max(200, ...series);
   const width = 760;
   const height = 240;
   const pad = { top: 20, right: 52, bottom: 36, left: 52 };
@@ -285,14 +312,17 @@ function renderHourlySolarChart(hours) {
   const plotH = height - pad.top - pad.bottom;
   const step = hours.length > 1 ? plotW / (hours.length - 1) : 0;
   const xAt = (index) => pad.left + index * step;
-  const yWatts = (value) => pad.top + plotH - (value / peak) * plotH;
+  const ySeries = (value) => pad.top + plotH - (value / peak) * plotH;
   const yCloud = (value) => pad.top + plotH - (value / 100) * plotH;
+  const formatTick = (value) => useGeneration
+    ? (value >= 1 ? value.toFixed(1) : value.toFixed(2))
+    : String(Math.round(value));
 
-  const wattPoints = hours.map((_, index) => `${xAt(index).toFixed(1)},${yWatts(watts[index]).toFixed(1)}`);
+  const seriesPoints = hours.map((_, index) => `${xAt(index).toFixed(1)},${ySeries(series[index]).toFixed(1)}`);
   const cloudPoints = hours.map((_, index) => `${xAt(index).toFixed(1)},${yCloud(clouds[index]).toFixed(1)}`);
-  const wattArea = [
+  const seriesArea = [
     `${xAt(0).toFixed(1)},${(pad.top + plotH).toFixed(1)}`,
-    ...wattPoints,
+    ...seriesPoints,
     `${xAt(hours.length - 1).toFixed(1)},${(pad.top + plotH).toFixed(1)}`
   ].join(" ");
 
@@ -309,13 +339,13 @@ function renderHourlySolarChart(hours) {
     }
   });
 
-  const wattTicks = [0, Math.round(peak / 2), Math.round(peak)];
+  const seriesTicks = [0, peak / 2, peak];
   const cloudTicks = [0, 50, 100];
-  const grid = wattTicks.map((tick) => {
-    const y = yWatts(tick);
+  const grid = seriesTicks.map((tick) => {
+    const y = ySeries(tick);
     return `
       <line class="watt-grid" x1="${pad.left}" x2="${width - pad.right}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" />
-      <text class="watt-axis" x="${pad.left - 10}" y="${(y + 4).toFixed(1)}" text-anchor="end">${tick}</text>`;
+      <text class="watt-axis" x="${pad.left - 10}" y="${(y + 4).toFixed(1)}" text-anchor="end">${formatTick(tick)}</text>`;
   }).join("");
   const cloudAxis = cloudTicks.map((tick) => {
     const y = yCloud(tick);
@@ -326,19 +356,26 @@ function renderHourlySolarChart(hours) {
     return `<text class="watt-hour" x="${xAt(index).toFixed(1)}" y="${height - 10}" text-anchor="middle">${escapeHtml(formatHour(hour.time))}</text>`;
   }).join("");
 
+  const totalKwh = weather?.solar?.estimatedKwhTotal;
+  const headingStrong = useGeneration ? "Expected generation" : "Expected solar";
+  const headingDetail = useGeneration
+    ? `~${Number(totalKwh || 0).toFixed(1)} kWh next 24h · hover for detail`
+    : "Cloud-adjusted W/m² · add panel watts in settings";
+  const legendPrimary = useGeneration ? "Expected kWh" : "Expected W/m²";
+
   elements.hourlyForecast.innerHTML = `
     <div class="hourly-chart" id="hourlyChart">
       <div class="hourly-chart-heading">
-        <strong>Expected solar</strong>
-        <span>Cloud-adjusted W/m² · hover for detail</span>
+        <strong>${headingStrong}</strong>
+        <span>${escapeHtml(headingDetail)}</span>
       </div>
       <div class="hourly-chart-plot" id="hourlyChartPlot">
         <svg viewBox="0 0 ${width} ${height}" aria-hidden="true">
           ${nightBands.join("")}
           ${grid}
           ${cloudAxis}
-          <polygon class="watt-area" points="${wattArea}"></polygon>
-          <polyline class="watt-line" fill="none" points="${wattPoints.join(" ")}"></polyline>
+          <polygon class="watt-area" points="${seriesArea}"></polygon>
+          <polyline class="watt-line" fill="none" points="${seriesPoints.join(" ")}"></polyline>
           <polyline class="cloud-line" fill="none" points="${cloudPoints.join(" ")}"></polyline>
           <line class="chart-scrubber" id="chartScrubber" x1="${pad.left}" x2="${pad.left}" y1="${pad.top}" y2="${pad.top + plotH}" hidden></line>
           <circle class="watt-dot" id="wattDot" r="4.5" hidden></circle>
@@ -348,7 +385,7 @@ function renderHourlySolarChart(hours) {
         <div class="hour-tooltip" id="hourTooltip" hidden></div>
       </div>
       <div class="solar-wattage-legend">
-        <span class="legend-watts">Expected W/m²</span>
+        <span class="legend-watts">${legendPrimary}</span>
         <span class="legend-cloud">Cloud cover %</span>
       </div>
     </div>`;
@@ -363,12 +400,12 @@ function renderHourlySolarChart(hours) {
   const showHour = (index) => {
     const hour = hours[index];
     const x = xAt(index);
-    const wattsValue = watts[index];
+    const seriesValue = series[index];
     scrubber.setAttribute("x1", x.toFixed(1));
     scrubber.setAttribute("x2", x.toFixed(1));
     scrubber.removeAttribute("hidden");
     wattDot.setAttribute("cx", x.toFixed(1));
-    wattDot.setAttribute("cy", yWatts(wattsValue).toFixed(1));
+    wattDot.setAttribute("cy", ySeries(seriesValue).toFixed(1));
     wattDot.removeAttribute("hidden");
     cloudDot.setAttribute("cx", x.toFixed(1));
     cloudDot.setAttribute("cy", yCloud(clouds[index]).toFixed(1));
@@ -376,12 +413,17 @@ function renderHourlySolarChart(hours) {
     tooltip.hidden = false;
     tooltip.className = `hour-tooltip${hour.isDay ? " day" : " night"}`;
     tooltip.style.setProperty("--temp-hue", String(temperatureHue(hour.temperature ?? 20)));
+    const primaryValue = useGeneration
+      ? `${seriesValue.toFixed(2)} kWh`
+      : `${Math.round(seriesValue)} W/m² expected`;
+    const faceLine = useGeneration ? formatFaceSplit(hour.faceWatts) : "";
     tooltip.innerHTML = `
       <strong>${escapeHtml(formatHour(hour.time))}</strong>
       <span class="hour-icon">${escapeHtml(hour.icon || "🌡️")}</span>
       <span class="hour-temp">${formatTemperature(hour.temperature)}°C</span>
       <small>${hour.cloudCover ?? "—"}% cloud</small>
-      <small>${Math.round(wattsValue)} W/m² expected</small>
+      <small>${primaryValue}</small>
+      ${faceLine ? `<small>${escapeHtml(faceLine)}</small>` : ""}
       <small>${escapeHtml(hour.label || "")}</small>`;
     const ratio = hours.length > 1 ? index / (hours.length - 1) : 0;
     const tipPercent = Math.min(88, Math.max(12, (pad.left + ratio * plotW) / width * 100));
@@ -415,6 +457,13 @@ function populateSmartConfig() {
   elements.weatherEnabled.checked = Boolean(smartConfig.weather.enabled);
   elements.weatherRefresh.value = String(smartConfig.weather.refreshMinutes);
   elements.weatherStatus.textContent = weatherStatusText(smartConfig);
+  const panels = smartConfig.integrations?.solarBattery?.panels || {};
+  elements.panelWattsN.value = panels.n ?? 0;
+  elements.panelWattsE.value = panels.e ?? 0;
+  elements.panelWattsS.value = panels.s ?? 0;
+  elements.panelWattsW.value = panels.w ?? 0;
+  elements.panelTilt.value = smartConfig.integrations?.solarBattery?.tiltDegrees ?? 25;
+  elements.solarPanelsStatus.textContent = solarPanelsStatusText(smartConfig);
   elements.automationEnabled.checked = Boolean(smartConfig.automation.enabled);
   elements.modeAssumption.value = smartConfig.automation.modeAssumption;
   elements.coolingRuleEnabled.checked = Boolean(smartConfig.automation.coolingRule?.enabled);
@@ -437,6 +486,30 @@ function weatherStatusText(config) {
   if (!config?.weather?.enabled) return "Off";
   if (config.location?.latitude == null || config.location?.longitude == null) return "Needs location";
   return "On";
+}
+
+function solarPanelsStatusText(config) {
+  const panels = config?.integrations?.solarBattery?.panels || {};
+  const total = ["n", "e", "s", "w"].reduce((sum, face) => sum + Number(panels[face] || 0), 0);
+  if (total <= 0) return "Not set";
+  const tilt = config.integrations?.solarBattery?.tiltDegrees ?? 25;
+  return `${Math.round(total / 1000 * 10) / 10} kW · ${tilt}°`;
+}
+
+function readSolarPanelsForm() {
+  return {
+    integrations: {
+      solarBattery: {
+        tiltDegrees: Number(elements.panelTilt.value || 25),
+        panels: {
+          n: Number(elements.panelWattsN.value || 0),
+          e: Number(elements.panelWattsE.value || 0),
+          s: Number(elements.panelWattsS.value || 0),
+          w: Number(elements.panelWattsW.value || 0)
+        }
+      }
+    }
+  };
 }
 
 function formatTimer(timer) {
@@ -694,6 +767,7 @@ function connectLiveUpdates() {
     try {
       smartConfig = JSON.parse(event.data);
       populateSmartConfig();
+      loadWeather(true);
     } catch {
       // Ignore malformed live settings.
     }
@@ -1049,6 +1123,18 @@ elements.saveWeatherButton.addEventListener("click", async () => {
 });
 elements.useDeviceLocationButton.addEventListener("click", useDeviceLocation);
 elements.saveAutomationButton.addEventListener("click", () => saveSmartConfig(readAutomationForm(), "Smart controls saved"));
+elements.saveSolarPanelsButton.addEventListener("click", async () => {
+  elements.saveSolarPanelsButton.disabled = true;
+  elements.saveSolarPanelsButton.textContent = "Saving…";
+  try {
+    await saveSmartConfig(readSolarPanelsForm(), "Solar panel settings saved");
+  } catch (error) {
+    showToast(error.message, true);
+  } finally {
+    elements.saveSolarPanelsButton.disabled = false;
+    elements.saveSolarPanelsButton.textContent = "Save solar panels";
+  }
+});
 elements.requestNotificationsButton.addEventListener("click", async () => {
   if (!("Notification" in window)) {
     showToast("This browser does not support notifications", true);
