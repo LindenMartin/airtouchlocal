@@ -99,7 +99,7 @@ const defaultSmartConfig = {
       enabled: false,
       tiltDegrees: 25,
       panels: { n: 0, e: 0, s: 0, w: 0 },
-      systemEfficiency: 0.85,
+      systemEfficiency: 0.92,
       note: "Panel watts by roof face plus shared tilt; used to estimate generation from the forecast."
     }
   }
@@ -221,7 +221,7 @@ function normalizeSmartConfig(value) {
     w: clampInteger(panels.w, 0, 100000, 0)
   };
   config.integrations.solarBattery.tiltDegrees = clampInteger(config.integrations.solarBattery.tiltDegrees, 0, 60, 25);
-  config.integrations.solarBattery.systemEfficiency = 0.85;
+  config.integrations.solarBattery.systemEfficiency = 0.92;
   const panelWattsTotal = Object.values(config.integrations.solarBattery.panels).reduce((sum, watts) => sum + watts, 0);
   config.integrations.solarBattery.enabled = panelWattsTotal > 0;
   config.integrations.solarBattery.note = String(config.integrations.solarBattery.note || defaultSmartConfig.integrations.solarBattery.note).slice(0, 200);
@@ -318,11 +318,12 @@ function weatherCode(code, isDay = true) {
   return { icon: "🌡️", label: "Weather" };
 }
 
-/** Expected irradiance (W/m²): night is 0; daylight shortwave derated by cloud cover. */
+/** Expected irradiance (W/m²) for planning charts. Night is 0.
+ *  Open-Meteo shortwave already includes clouds; apply only a light extra derate
+ *  so heavy cloud still visibly lowers the irradiance series. */
 function cloudTransmission(cloudCover) {
   const cloud = Math.min(100, Math.max(0, Number(cloudCover) || 0)) / 100;
-  // Clear keeps full irradiance; overcast keeps ~20% diffuse. Mid cloud bites harder than linear.
-  return 0.2 + 0.8 * Math.pow(1 - cloud, 1.2);
+  return 1 - 0.25 * Math.pow(cloud, 1.1);
 }
 
 function effectiveSolarWatts(hour) {
@@ -375,19 +376,36 @@ function solarPosition(latitude, longitude, timeIso) {
   return { elevation, azimuth };
 }
 
-function planeOfArrayFactor(sun, panelAzimuthDeg, tiltDeg) {
+/** POA / GHI using beam transposition + isotropic diffuse + ground reflectance. */
+function planeOfArrayFactor(sun, panelAzimuthDeg, tiltDeg, cloudCover = 0) {
   if (!sun || sun.elevation <= 0) return 0;
   const rad = Math.PI / 180;
   const elev = sun.elevation * rad;
   const sunAz = sun.azimuth * rad;
   const panelAz = panelAzimuthDeg * rad;
-  const tilt = tiltDeg * rad;
+  const tilt = Number(tiltDeg) * rad;
   const cosInc = Math.sin(elev) * Math.cos(tilt)
     + Math.cos(elev) * Math.sin(tilt) * Math.cos(sunAz - panelAz);
   const incidence = Math.max(0, cosInc);
   const sinElev = Math.max(Math.sin(elev), 0.05);
-  // Relative to horizontal GHI: beam on tilted plane vs horizontal.
-  return Math.min(1.4, Math.max(0, incidence / sinElev));
+  const beamRatio = Math.min(2.2, incidence / sinElev);
+  const cloud = Math.min(100, Math.max(0, Number(cloudCover) || 0)) / 100;
+  // Clear sky is mostly beam; overcast is mostly diffuse.
+  const diffuseFraction = 0.12 + 0.78 * Math.pow(cloud, 0.9);
+  const albedo = 0.2;
+  const skyDiffuse = diffuseFraction * (1 + Math.cos(tilt)) / 2;
+  const groundReflected = albedo * (1 - Math.cos(tilt)) / 2;
+  const beam = (1 - diffuseFraction) * beamRatio;
+  return Math.max(0, beam + skyDiffuse + groundReflected);
+}
+
+/** Module power vs STC using ambient temp and GHI (NOCT-style cell temp). */
+function temperatureFactor(ambientC, ghiWm2) {
+  if (!Number.isFinite(ambientC)) return 1;
+  const ghi = Math.max(0, Number(ghiWm2) || 0);
+  const cellTemp = ambientC + ((45 - 20) / 800) * ghi;
+  // Typical crystalline temp coefficient ~ -0.35% / °C from 25°C STC.
+  return Math.max(0.85, Math.min(1.12, 1 - 0.0035 * (cellTemp - 25)));
 }
 
 function panelsConfigured(solarBattery) {
@@ -403,7 +421,8 @@ function estimateHourGeneration(hour, config) {
   if (config.location?.latitude == null || config.location?.longitude == null) {
     return { estimatedWatts: null, estimatedKwh: null, faceWatts: null };
   }
-  const ghi = Number(hour.effectiveWatts);
+  // Use Open-Meteo GHI directly for generation — it already includes cloud attenuation.
+  const ghi = Number(hour.shortwaveRadiation);
   if (!hour.isDay || !Number.isFinite(ghi) || ghi <= 0) {
     return { estimatedWatts: 0, estimatedKwh: 0, faceWatts: { n: 0, e: 0, s: 0, w: 0 } };
   }
@@ -412,7 +431,8 @@ function estimateHourGeneration(hour, config) {
     return { estimatedWatts: 0, estimatedKwh: 0, faceWatts: { n: 0, e: 0, s: 0, w: 0 } };
   }
   const tilt = Number(solarBattery.tiltDegrees ?? 25);
-  const efficiency = Number(solarBattery.systemEfficiency ?? 0.85);
+  const efficiency = Number(solarBattery.systemEfficiency ?? 0.92);
+  const tempFactor = temperatureFactor(Number(hour.temperature), ghi);
   const faceWatts = {};
   let total = 0;
   for (const face of ["n", "e", "s", "w"]) {
@@ -421,8 +441,8 @@ function estimateHourGeneration(hour, config) {
       faceWatts[face] = 0;
       continue;
     }
-    const factor = planeOfArrayFactor(sun, FACE_AZIMUTH[face], tilt);
-    const watts = panelW * (ghi / 1000) * factor * efficiency;
+    const factor = planeOfArrayFactor(sun, FACE_AZIMUTH[face], tilt, hour.cloudCover);
+    const watts = panelW * (ghi / 1000) * factor * efficiency * tempFactor;
     faceWatts[face] = Math.round(watts);
     total += watts;
   }
