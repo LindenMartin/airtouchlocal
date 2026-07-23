@@ -368,6 +368,36 @@ h2 { margin-bottom: 0; letter-spacing: -.035em; font-weight: 590; }
 }
 .compact-heading { margin-bottom: 14px; }
 .compact-heading h2 { font-size: 22px; }
+.hourly-day-nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 2px;
+}
+.hourly-day-nav h2 {
+  min-width: 11rem;
+  margin: 0;
+  text-align: center;
+}
+.day-nav-button {
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--ink);
+  background: rgba(255,255,255,.04);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+.day-nav-button:hover:not(:disabled) {
+  border-color: rgba(255,181,109,.35);
+  background: rgba(255,181,109,.08);
+}
+.day-nav-button:disabled {
+  opacity: .35;
+  cursor: default;
+}
 .hourly-forecast {
   position: relative;
 }
@@ -407,7 +437,7 @@ h2 { margin-bottom: 0; letter-spacing: -.035em; font-weight: 590; }
 .hourly-chart-plot {
   position: relative;
   width: 100%;
-  min-height: 240px;
+  min-height: 250px;
   cursor: crosshair;
   touch-action: none;
 }
@@ -415,7 +445,7 @@ h2 { margin-bottom: 0; letter-spacing: -.035em; font-weight: 590; }
   display: block;
   width: 100%;
   height: auto;
-  aspect-ratio: 760 / 240;
+  aspect-ratio: 780 / 250;
 }
 .night-band {
   fill: rgba(105,184,255,.08);

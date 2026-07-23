@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#101b20">
   <title>AirTouch Local</title>
-  <link rel="stylesheet" href="/styles.css?v=11">
+  <link rel="stylesheet" href="/styles.css?v=12">
 </head>
 <body>
   <main class="shell">
@@ -91,11 +91,15 @@
       </div>
     </section>
 
-    <section class="hourly-weather-card" id="hourlyWeatherCard" aria-label="24 hour weather and solar forecast">
+    <section class="hourly-weather-card" id="hourlyWeatherCard" aria-label="Daily weather and solar forecast">
       <div class="section-heading compact-heading">
         <div>
           <p class="eyebrow">Solar planning</p>
-          <h2>Next 24 hours</h2>
+          <div class="hourly-day-nav">
+            <button type="button" class="day-nav-button" id="solarDayPrev" aria-label="Previous day">‹</button>
+            <h2 id="hourlyDayTitle">Today</h2>
+            <button type="button" class="day-nav-button" id="solarDayNext" aria-label="Next day">›</button>
+          </div>
         </div>
         <p id="hourlyWeatherSummary">Cloud cover drives solar generation.</p>
       </div>
@@ -206,7 +210,7 @@
             <label><span>Roof tilt (°)</span><input id="panelTilt" type="number" min="0" max="60" step="1" placeholder="25"></label>
           </div>
           <div class="settings-actions">
-            <button class="secondary-button" id="saveSolarPanelsButton">Save solar panels</button>
+            <button type="button" class="secondary-button" id="saveSolarPanelsButton">Save solar panels</button>
           </div>
           <p class="settings-note">Enter DC watts on each roof face and a shared tilt. In the southern hemisphere north-facing is usually strongest. Estimates use sun position, cloud-adjusted irradiance, and an 85% system derate.</p>
         </section>
@@ -327,6 +331,6 @@
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
     <footer>AirTouch Local · Private by default</footer>
   </main>
-  <script src="/app.js?v=16"></script>
+  <script src="/app.js?v=18"></script>
 </body>
 </html>

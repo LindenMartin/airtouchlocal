@@ -465,7 +465,8 @@ function solarOutlook(hours, extras = {}) {
   const daylight = hours.filter((hour) => hour.isDay);
   const base = {
     panelsConfigured: Boolean(extras.panelsConfigured),
-    estimatedKwhTotal: extras.estimatedKwhTotal ?? null
+    estimatedKwhTotal: extras.estimatedKwhTotal ?? null,
+    windowLabel: extras.windowLabel || "next 24h"
   };
   if (!daylight.length) {
     return { label: "Night", detail: "No solar generation expected in this window.", ...base };
@@ -474,7 +475,7 @@ function solarOutlook(hours, extras = {}) {
   if (base.panelsConfigured && base.estimatedKwhTotal != null) {
     const total = base.estimatedKwhTotal;
     const peakKw = Math.max(...hours.map((hour) => Number(hour.estimatedWatts ?? 0))) / 1000;
-    const detail = `${averageCloud}% avg cloud · ~${total.toFixed(1)} kWh next 24h · peak ${peakKw.toFixed(1)} kW`;
+    const detail = `${averageCloud}% avg cloud · ~${total.toFixed(1)} kWh ${base.windowLabel} · peak ${peakKw.toFixed(1)} kW`;
     if (total >= 12 && averageCloud <= 40) return { label: "Strong solar window", detail, ...base };
     if (total >= 6) return { label: "Useful solar window", detail, ...base };
     if (total >= 2) return { label: "Patchy solar", detail, ...base };
@@ -485,6 +486,45 @@ function solarOutlook(hours, extras = {}) {
   if (averageCloud <= 50 && peakWatts >= 280) return { label: "Useful solar window", detail: `${averageCloud}% avg cloud · peak ${Math.round(peakWatts)} W/m² expected`, ...base };
   if (averageCloud <= 75 || peakWatts >= 140) return { label: "Patchy solar", detail: `${averageCloud}% avg cloud · peak ${Math.round(peakWatts)} W/m² expected`, ...base };
   return { label: "Poor solar window", detail: `${averageCloud}% avg cloud · peak ${Math.round(peakWatts)} W/m² expected`, ...base };
+}
+
+function hourDateKey(timeIso) {
+  const match = String(timeIso || "").match(/^(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : null;
+}
+
+function groupHoursByDay(hours) {
+  const days = [];
+  const byDate = new Map();
+  hours.forEach((hour) => {
+    const date = hourDateKey(hour.time);
+    if (!date) return;
+    if (!byDate.has(date)) {
+      const entry = { date, hours: [] };
+      byDate.set(date, entry);
+      days.push(entry);
+    }
+    byDate.get(date).hours.push(hour);
+  });
+  return days.map((day) => {
+    const daylight = day.hours.filter((hour) => hour.isDay);
+    const estimatedKwhTotal = day.hours.every((hour) => hour.estimatedKwh == null)
+      ? null
+      : Math.round(day.hours.reduce((sum, hour) => sum + Number(hour.estimatedKwh || 0), 0) * 100) / 100;
+    const peakKw = Math.max(0, ...day.hours.map((hour) => Number(hour.estimatedWatts || 0))) / 1000;
+    const peakWm2 = Math.max(0, ...daylight.map((hour) => Number(hour.effectiveWatts || 0)));
+    const averageCloud = daylight.length
+      ? Math.round(daylight.reduce((sum, hour) => sum + Number(hour.cloudCover ?? 0), 0) / daylight.length)
+      : null;
+    return {
+      date: day.date,
+      hours: day.hours,
+      estimatedKwhTotal,
+      peakKw: Math.round(peakKw * 10) / 10,
+      peakWm2: Math.round(peakWm2),
+      averageCloud
+    };
+  });
 }
 
 function locationQueryVariants(query) {
@@ -522,30 +562,34 @@ async function readWeather(force = false) {
   const longitude = encodeURIComponent(config.location.longitude);
   const timezone = encodeURIComponent(config.location.timezone || "auto");
   const hourly = "temperature_2m,apparent_temperature,precipitation_probability,cloud_cover,shortwave_radiation,is_day,weather_code";
-  const url = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,rain,weather_code,wind_speed_10m,cloud_cover&hourly=${hourly}&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&forecast_days=3&timezone=${timezone}`;
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,rain,weather_code,wind_speed_10m,cloud_cover&hourly=${hourly}&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&past_days=3&forecast_days=4&timezone=${timezone}`;
   const data = await httpsJson(url);
   const currentIsDay = Boolean(data.current?.is_day);
   const currentCode = weatherCode(data.current?.weather_code, currentIsDay);
   const currentTime = data.current?.time;
-  const hourlyForecast = (data.hourly?.time || [])
-    .map((time, index) => {
-      const isDay = Boolean(data.hourly.is_day?.[index]);
-      const hour = {
-        time,
-        temperature: data.hourly.temperature_2m?.[index] ?? null,
-        apparentTemperature: data.hourly.apparent_temperature?.[index] ?? null,
-        rainChance: data.hourly.precipitation_probability?.[index] ?? null,
-        cloudCover: data.hourly.cloud_cover?.[index] ?? null,
-        shortwaveRadiation: data.hourly.shortwave_radiation?.[index] ?? null,
-        isDay,
-        ...weatherCode(data.hourly.weather_code?.[index], isDay)
-      };
-      hour.effectiveWatts = effectiveSolarWatts(hour);
-      return hour;
-    })
+  const allHours = (data.hourly?.time || []).map((time, index) => {
+    const isDay = Boolean(data.hourly.is_day?.[index]);
+    const hour = {
+      time,
+      temperature: data.hourly.temperature_2m?.[index] ?? null,
+      apparentTemperature: data.hourly.apparent_temperature?.[index] ?? null,
+      rainChance: data.hourly.precipitation_probability?.[index] ?? null,
+      cloudCover: data.hourly.cloud_cover?.[index] ?? null,
+      shortwaveRadiation: data.hourly.shortwave_radiation?.[index] ?? null,
+      isDay,
+      ...weatherCode(data.hourly.weather_code?.[index], isDay)
+    };
+    hour.effectiveWatts = effectiveSolarWatts(hour);
+    return hour;
+  });
+  const generationAll = attachPanelGeneration(allHours, config);
+  const hourlyDays = groupHoursByDay(generationAll.hours);
+  const rollingHours = generationAll.hours
     .filter((hour) => currentTime ? hour.time > currentTime : Date.parse(hour.time) > Date.now())
     .slice(0, 24);
-  const generation = attachPanelGeneration(hourlyForecast, config);
+  const rollingTotal = generationAll.panelsConfigured
+    ? Math.round(rollingHours.reduce((sum, hour) => sum + Number(hour.estimatedKwh || 0), 0) * 100) / 100
+    : null;
   const forecast = (data.daily?.time || []).map((date, index) => ({
     date,
     max: data.daily.temperature_2m_max?.[index] ?? null,
@@ -566,12 +610,15 @@ async function readWeather(force = false) {
       windSpeed: data.current?.wind_speed_10m ?? null,
       cloudCover: data.current?.cloud_cover ?? null,
       isDay: currentIsDay,
+      time: currentTime || null,
       ...currentCode
     },
-    hourly: generation.hours,
-    solar: solarOutlook(generation.hours, {
-      panelsConfigured: generation.panelsConfigured,
-      estimatedKwhTotal: generation.estimatedKwhTotal
+    hourly: rollingHours,
+    hourlyDays,
+    solar: solarOutlook(rollingHours, {
+      panelsConfigured: generationAll.panelsConfigured,
+      estimatedKwhTotal: rollingTotal,
+      windowLabel: "next 24h"
     }),
     forecast,
     googleWeatherUrl: googleWeatherUrl(config.location),

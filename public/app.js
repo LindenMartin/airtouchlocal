@@ -16,8 +16,11 @@ const elements = {
   greeting: document.querySelector("#greeting"),
   googleWeatherLink: document.querySelector("#googleWeatherLink"),
   hourlyForecast: document.querySelector("#hourlyForecast"),
+  hourlyDayTitle: document.querySelector("#hourlyDayTitle"),
   hourlyWeatherCard: document.querySelector("#hourlyWeatherCard"),
   hourlyWeatherSummary: document.querySelector("#hourlyWeatherSummary"),
+  solarDayNext: document.querySelector("#solarDayNext"),
+  solarDayPrev: document.querySelector("#solarDayPrev"),
   automationEnabled: document.querySelector("#automationEnabled"),
   automationStatus: document.querySelector("#automationStatus"),
   eventList: document.querySelector("#eventList"),
@@ -92,6 +95,8 @@ let refreshTimer;
 let pendingLiveState = null;
 let smartConfig = null;
 let weather = null;
+let solarDayIndex = null;
+let solarDayDate = null;
 let notifiedState = { spill: false, hot: false, cold: false };
 const REFRESH_INTERVAL_KEY = "airtouch-refresh-seconds";
 const REFRESH_INTERVALS = [5, 10, 15, 30, 60];
@@ -238,7 +243,9 @@ function renderWeather() {
     elements.weatherForecast.innerHTML = `<div><strong>Weather</strong><span>${escapeHtml(weather?.reason || "Not configured")}</span></div>`;
     elements.solarOutlook.innerHTML = "<strong>Solar outlook</strong><span>Waiting for cloud forecast</span>";
     elements.hourlyForecast.innerHTML = '<div class="hourly-empty">Enable weather to see cloud cover and solar radiation.</div>';
+    if (elements.hourlyDayTitle) elements.hourlyDayTitle.textContent = "Solar day";
     setText(elements.hourlyWeatherSummary, "Cloud cover drives solar generation.", false);
+    updateSolarDayNav();
     elements.googleWeatherLink.href = "https://www.google.com/search?q=weather";
     elements.weatherCard.classList.remove("ready");
     elements.hourlyWeatherCard.classList.remove("ready");
@@ -252,7 +259,6 @@ function renderWeather() {
   elements.weatherSummary.innerHTML = `${escapeHtml(weather.current.label)} · ${weather.current.cloudCover ?? "—"}% cloud · feels <span class="temp-inline" style="${temperatureStyle(weather.current.apparentTemperature)}">${formatTemperature(weather.current.apparentTemperature)}°C</span>`;
   elements.googleWeatherLink.href = weather.googleWeatherUrl || "https://www.google.com/search?q=weather";
   elements.solarOutlook.innerHTML = `<strong>${escapeHtml(weather.solar?.label || "Solar outlook")}</strong><span>${escapeHtml(weather.solar?.detail || "Waiting for cloud forecast")}</span>`;
-  setText(elements.hourlyWeatherSummary, weather.solar?.detail || "Cloud cover drives solar generation.", true);
   elements.weatherForecast.innerHTML = weather.forecast.slice(0, 3).map((day) => {
     const label = new Date(`${day.date}T12:00:00`).toLocaleDateString(undefined, { weekday: "short" });
     return `<div>
@@ -260,7 +266,103 @@ function renderWeather() {
       <span><span class="temp-inline" style="${temperatureStyle(day.min)}">${formatTemperature(day.min)}°</span>–<span class="temp-inline" style="${temperatureStyle(day.max)}">${formatTemperature(day.max)}°C</span> · ${day.rainChance ?? "—"}% rain</span>
     </div>`;
   }).join("");
-  renderHourlySolarChart((weather.hourly || []).slice(0, 24));
+  ensureSolarDayIndex();
+  renderSelectedSolarDay();
+}
+
+function solarDayList() {
+  return weather?.hourlyDays?.length ? weather.hourlyDays : [];
+}
+
+function ensureSolarDayIndex() {
+  const days = solarDayList();
+  if (!days.length) {
+    solarDayIndex = null;
+    solarDayDate = null;
+    return;
+  }
+  if (solarDayDate) {
+    const existing = days.findIndex((day) => day.date === solarDayDate);
+    if (existing >= 0) {
+      solarDayIndex = existing;
+      return;
+    }
+  }
+  const todayKey = hourDateKeyClient(weather?.current?.time) || hourDateKeyClient(new Date().toISOString());
+  const todayIndex = days.findIndex((day) => day.date === todayKey);
+  solarDayIndex = todayIndex >= 0 ? todayIndex : 0;
+  solarDayDate = days[solarDayIndex].date;
+}
+
+function shiftSolarDay(delta) {
+  const days = solarDayList();
+  if (!days.length || solarDayIndex == null) return;
+  const next = Math.min(days.length - 1, Math.max(0, solarDayIndex + delta));
+  if (next === solarDayIndex) return;
+  solarDayIndex = next;
+  solarDayDate = days[solarDayIndex].date;
+  renderSelectedSolarDay();
+}
+
+function hourDateKeyClient(timeIso) {
+  const match = String(timeIso || "").match(/^(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : null;
+}
+
+function formatSolarDayTitle(dateKey) {
+  if (!dateKey) return "Solar day";
+  const todayKey = hourDateKeyClient(weather?.current?.time) || hourDateKeyClient(new Date().toISOString());
+  const date = new Date(`${dateKey}T12:00:00`);
+  const weekday = date.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+  const anchor = new Date(`${todayKey}T12:00:00`);
+  const tomorrow = new Date(anchor);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const yesterday = new Date(anchor);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const keyOf = (value) => [
+    value.getFullYear(),
+    String(value.getMonth() + 1).padStart(2, "0"),
+    String(value.getDate()).padStart(2, "0")
+  ].join("-");
+  if (dateKey === todayKey) return `Today · ${weekday}`;
+  if (dateKey === keyOf(tomorrow)) return `Tomorrow · ${weekday}`;
+  if (dateKey === keyOf(yesterday)) return `Yesterday · ${weekday}`;
+  return weekday;
+}
+
+function selectedDaySummary(day) {
+  if (!day) return "Cloud cover drives solar generation.";
+  const useGeneration = Boolean(weather?.solar?.panelsConfigured);
+  const cloud = day.averageCloud == null ? "—" : `${day.averageCloud}% avg cloud`;
+  if (useGeneration && day.estimatedKwhTotal != null) {
+    return `${cloud} · ~${Number(day.estimatedKwhTotal).toFixed(1)} kWh · peak ${Number(day.peakKw || 0).toFixed(1)} kW`;
+  }
+  return `${cloud} · peak ${day.peakWm2 || 0} W/m² expected`;
+}
+
+function renderSelectedSolarDay() {
+  const days = solarDayList();
+  if (!days.length) {
+    if (elements.hourlyDayTitle) elements.hourlyDayTitle.textContent = "Solar day";
+    setText(elements.hourlyWeatherSummary, weather?.solar?.detail || "Cloud cover drives solar generation.", true);
+    renderHourlySolarChart(weather?.hourly || [], { dayTotalKwh: weather?.solar?.estimatedKwhTotal });
+    updateSolarDayNav();
+    return;
+  }
+  const day = days[solarDayIndex] || days[0];
+  if (elements.hourlyDayTitle) elements.hourlyDayTitle.textContent = formatSolarDayTitle(day.date);
+  setText(elements.hourlyWeatherSummary, selectedDaySummary(day), true);
+  renderHourlySolarChart(day.hours || [], {
+    dayTotalKwh: day.estimatedKwhTotal,
+    dayLabel: formatSolarDayTitle(day.date)
+  });
+  updateSolarDayNav();
+}
+
+function updateSolarDayNav() {
+  const days = solarDayList();
+  if (elements.solarDayPrev) elements.solarDayPrev.disabled = !days.length || solarDayIndex <= 0;
+  if (elements.solarDayNext) elements.solarDayNext.disabled = !days.length || solarDayIndex >= days.length - 1;
 }
 
 function hourWatts(hour) {
@@ -275,9 +377,11 @@ function hourWatts(hour) {
   return Math.max(0, Math.round(radiation * transmission));
 }
 
-function hourGenerationKwh(hour) {
-  const value = Number(hour.estimatedKwh);
-  return Number.isFinite(value) ? Math.max(0, value) : 0;
+function hourGenerationKw(hour) {
+  const watts = Number(hour.estimatedWatts);
+  if (Number.isFinite(watts)) return Math.max(0, watts / 1000);
+  const kwh = Number(hour.estimatedKwh);
+  return Number.isFinite(kwh) ? Math.max(0, kwh) : 0;
 }
 
 function formatFaceSplit(faceWatts) {
@@ -292,7 +396,7 @@ function formatFaceSplit(faceWatts) {
   return parts.length ? parts.join(" · ") : "";
 }
 
-function renderHourlySolarChart(hours) {
+function renderHourlySolarChart(hours, options = {}) {
   if (!elements.hourlyForecast) return;
   if (!hours.length) {
     elements.hourlyForecast.innerHTML = '<div class="hourly-empty">No hourly forecast returned yet.</div>';
@@ -300,23 +404,27 @@ function renderHourlySolarChart(hours) {
   }
 
   const useGeneration = Boolean(weather?.solar?.panelsConfigured);
-  const series = useGeneration ? hours.map(hourGenerationKwh) : hours.map(hourWatts);
+  const series = useGeneration ? hours.map(hourGenerationKw) : hours.map(hourWatts);
   const clouds = hours.map((hour) => Math.min(100, Math.max(0, Number(hour.cloudCover ?? 0))));
   const peak = useGeneration
     ? Math.max(0.5, ...series)
     : Math.max(200, ...series);
-  const width = 760;
-  const height = 240;
-  const pad = { top: 20, right: 52, bottom: 36, left: 52 };
+  const width = 780;
+  const height = 250;
+  const pad = { top: 22, right: 54, bottom: 38, left: 68 };
   const plotW = width - pad.left - pad.right;
   const plotH = height - pad.top - pad.bottom;
   const step = hours.length > 1 ? plotW / (hours.length - 1) : 0;
   const xAt = (index) => pad.left + index * step;
   const ySeries = (value) => pad.top + plotH - (value / peak) * plotH;
   const yCloud = (value) => pad.top + plotH - (value / 100) * plotH;
-  const formatTick = (value) => useGeneration
-    ? (value >= 1 ? value.toFixed(1) : value.toFixed(2))
-    : String(Math.round(value));
+  const formatTick = (value) => {
+    if (useGeneration) {
+      const number = value >= 10 ? value.toFixed(0) : value.toFixed(1);
+      return `${number} kW`;
+    }
+    return `${Math.round(value)} W/m²`;
+  };
 
   const seriesPoints = hours.map((_, index) => `${xAt(index).toFixed(1)},${ySeries(series[index]).toFixed(1)}`);
   const cloudPoints = hours.map((_, index) => `${xAt(index).toFixed(1)},${yCloud(clouds[index]).toFixed(1)}`);
@@ -352,16 +460,18 @@ function renderHourlySolarChart(hours) {
     return `<text class="cloud-axis" x="${width - pad.right + 10}" y="${(y + 4).toFixed(1)}" text-anchor="start">${tick}%</text>`;
   }).join("");
   const hourLabels = hours.map((hour, index) => {
-    if (index % 3 !== 0 && index !== hours.length - 1) return "";
+    const hourMatch = String(hour.time || "").match(/T(\d{2}):/);
+    const hourNum = hourMatch ? Number(hourMatch[1]) : index;
+    if (hourNum % 3 !== 0) return "";
     return `<text class="watt-hour" x="${xAt(index).toFixed(1)}" y="${height - 10}" text-anchor="middle">${escapeHtml(formatHour(hour.time))}</text>`;
   }).join("");
 
-  const totalKwh = weather?.solar?.estimatedKwhTotal;
-  const headingStrong = useGeneration ? "Expected generation" : "Expected solar";
+  const totalKwh = options.dayTotalKwh;
+  const headingStrong = useGeneration ? "Expected generation" : "Expected irradiance";
   const headingDetail = useGeneration
-    ? `~${Number(totalKwh || 0).toFixed(1)} kWh next 24h · hover for detail`
+    ? `~${Number(totalKwh || 0).toFixed(1)} kWh this day · hover for detail`
     : "Cloud-adjusted W/m² · add panel watts in settings";
-  const legendPrimary = useGeneration ? "Expected kWh" : "Expected W/m²";
+  const legendPrimary = useGeneration ? "Power (kW)" : "Irradiance (W/m²)";
 
   elements.hourlyForecast.innerHTML = `
     <div class="hourly-chart" id="hourlyChart">
@@ -414,8 +524,8 @@ function renderHourlySolarChart(hours) {
     tooltip.className = `hour-tooltip${hour.isDay ? " day" : " night"}`;
     tooltip.style.setProperty("--temp-hue", String(temperatureHue(hour.temperature ?? 20)));
     const primaryValue = useGeneration
-      ? `${seriesValue.toFixed(2)} kWh`
-      : `${Math.round(seriesValue)} W/m² expected`;
+      ? `${seriesValue.toFixed(2)} kW · ${(Number(hour.estimatedKwh) || 0).toFixed(2)} kWh`
+      : `${Math.round(seriesValue)} W/m²`;
     const faceLine = useGeneration ? formatFaceSplit(hour.faceWatts) : "";
     tooltip.innerHTML = `
       <strong>${escapeHtml(formatHour(hour.time))}</strong>
@@ -458,12 +568,12 @@ function populateSmartConfig() {
   elements.weatherRefresh.value = String(smartConfig.weather.refreshMinutes);
   elements.weatherStatus.textContent = weatherStatusText(smartConfig);
   const panels = smartConfig.integrations?.solarBattery?.panels || {};
-  elements.panelWattsN.value = panels.n ?? 0;
-  elements.panelWattsE.value = panels.e ?? 0;
-  elements.panelWattsS.value = panels.s ?? 0;
-  elements.panelWattsW.value = panels.w ?? 0;
-  elements.panelTilt.value = smartConfig.integrations?.solarBattery?.tiltDegrees ?? 25;
-  elements.solarPanelsStatus.textContent = solarPanelsStatusText(smartConfig);
+  if (elements.panelWattsN) elements.panelWattsN.value = panels.n ?? 0;
+  if (elements.panelWattsE) elements.panelWattsE.value = panels.e ?? 0;
+  if (elements.panelWattsS) elements.panelWattsS.value = panels.s ?? 0;
+  if (elements.panelWattsW) elements.panelWattsW.value = panels.w ?? 0;
+  if (elements.panelTilt) elements.panelTilt.value = smartConfig.integrations?.solarBattery?.tiltDegrees ?? 25;
+  if (elements.solarPanelsStatus) elements.solarPanelsStatus.textContent = solarPanelsStatusText(smartConfig);
   elements.automationEnabled.checked = Boolean(smartConfig.automation.enabled);
   elements.modeAssumption.value = smartConfig.automation.modeAssumption;
   elements.coolingRuleEnabled.checked = Boolean(smartConfig.automation.coolingRule?.enabled);
@@ -1123,18 +1233,22 @@ elements.saveWeatherButton.addEventListener("click", async () => {
 });
 elements.useDeviceLocationButton.addEventListener("click", useDeviceLocation);
 elements.saveAutomationButton.addEventListener("click", () => saveSmartConfig(readAutomationForm(), "Smart controls saved"));
-elements.saveSolarPanelsButton.addEventListener("click", async () => {
-  elements.saveSolarPanelsButton.disabled = true;
-  elements.saveSolarPanelsButton.textContent = "Saving…";
-  try {
-    await saveSmartConfig(readSolarPanelsForm(), "Solar panel settings saved");
-  } catch (error) {
-    showToast(error.message, true);
-  } finally {
-    elements.saveSolarPanelsButton.disabled = false;
-    elements.saveSolarPanelsButton.textContent = "Save solar panels";
-  }
-});
+if (elements.solarDayPrev) elements.solarDayPrev.addEventListener("click", () => shiftSolarDay(-1));
+if (elements.solarDayNext) elements.solarDayNext.addEventListener("click", () => shiftSolarDay(1));
+if (elements.saveSolarPanelsButton) {
+  elements.saveSolarPanelsButton.addEventListener("click", async () => {
+    elements.saveSolarPanelsButton.disabled = true;
+    elements.saveSolarPanelsButton.textContent = "Saving…";
+    try {
+      await saveSmartConfig(readSolarPanelsForm(), "Solar panel settings saved");
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      elements.saveSolarPanelsButton.disabled = false;
+      elements.saveSolarPanelsButton.textContent = "Save solar panels";
+    }
+  });
+}
 elements.requestNotificationsButton.addEventListener("click", async () => {
   if (!("Notification" in window)) {
     showToast("This browser does not support notifications", true);
